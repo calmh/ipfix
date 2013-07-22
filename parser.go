@@ -95,84 +95,97 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 		if err != nil {
 			return
 		}
-		setEndsAt := read + int(setHdr.Length)
 		read += SetHeaderLength
 
-		for read < setEndsAt {
-			if setEndsAt-read < int(s.minRecord[setHdr.SetId]) {
-				// Padding
-				_, err = io.ReadFull(s.reader, make([]byte, setEndsAt-read))
-				if err != nil {
-					return
-				}
-				read += setEndsAt - read
-			} else if setHdr.SetId == 2 {
-				// Template Set
-				var ts *TemplateSet
-				var tsRead int
-				ts, tsRead, err = s.readTemplateSet()
-				if err != nil {
-					return
-				}
-				read += tsRead
-				msg.TemplateSets = append(msg.TemplateSets, *ts)
+		tsets, dsets, tr, err := s.readSet(setHdr)
+		if err != nil {
+			return nil, err
+		}
+		read += tr
+		msg.TemplateSets = append(msg.TemplateSets, tsets...)
+		msg.DataSets = append(msg.DataSets, dsets...)
+	}
+	return
+}
 
-				tid := ts.TemplateHeader.TemplateId
-				s.Templates[tid] = ts.Records
-
-				var minLength uint16
-				for i := range ts.Records {
-					if ts.Records[i].Length == 65535 {
-						minLength += 1
-					} else {
-						minLength += ts.Records[i].Length
-					}
-					s.minRecord[i] = minLength
-				}
-			} else if setHdr.SetId == 3 {
-				// Options Template Set, not handled
-				_, err = io.ReadFull(s.reader, make([]byte, setEndsAt-read))
-				if err != nil {
-					return
-				}
-				read += setEndsAt - read
-			} else {
-				// Data Set
-				ds := DataSet{}
-				ds.TemplateId = setHdr.SetId
-
-				if tpl := s.Templates[setHdr.SetId]; tpl != nil {
-					ds.Records = make([][]byte, len(tpl))
-					for i := range tpl {
-						var bs []byte
-						if tpl[i].Length == 65535 {
-							var bsRead int
-							bs, bsRead, err = s.readVariableLength()
-							if err != nil {
-								return
-							}
-							read += bsRead
-						} else {
-							bs = make([]byte, tpl[i].Length)
-							_, err = io.ReadFull(s.reader, bs)
-							if err != nil {
-								return
-							}
-							read += len(bs)
-						}
-						ds.Records[i] = bs
-					}
-				} else {
-					// Data set with unknown template
-					_, err = io.ReadFull(s.reader, make([]byte, setEndsAt-read))
-					if err != nil {
-						return
-					}
-					read += setEndsAt - read
-				}
-
-				msg.DataSets = append(msg.DataSets, ds)
+func (s *Session) readSet(setHdr SetHeader) (tsets []TemplateSet, dsets []DataSet, read int, err error) {
+	tsets = make([]TemplateSet, 0)
+	dsets = make([]DataSet, 0)
+	setEndsAt := int(setHdr.Length) - SetHeaderLength
+	for read < setEndsAt {
+		if setEndsAt-read < int(s.minRecord[setHdr.SetId]) {
+			// Padding
+			_, err = io.ReadFull(s.reader, make([]byte, setEndsAt-read))
+			if err != nil {
+				return
 			}
+			read += setEndsAt - read
+		} else if setHdr.SetId == 2 {
+			// Template Set
+			var ts *TemplateSet
+			var tsRead int
+			ts, tsRead, err = s.readTemplateSet()
+			if err != nil {
+				return
+			}
+			read += tsRead
+			tsets = append(tsets, *ts)
+
+			tid := ts.TemplateHeader.TemplateId
+			s.Templates[tid] = ts.Records
+
+			var minLength uint16
+			for i := range ts.Records {
+				if ts.Records[i].Length == 65535 {
+					minLength += 1
+				} else {
+					minLength += ts.Records[i].Length
+				}
+				s.minRecord[i] = minLength
+			}
+		} else if setHdr.SetId == 3 {
+			// Options Template Set, not handled
+			_, err = io.ReadFull(s.reader, make([]byte, setEndsAt-read))
+			if err != nil {
+				return
+			}
+			read += setEndsAt - read
+		} else {
+			// Data Set
+			ds := DataSet{}
+			ds.TemplateId = setHdr.SetId
+
+			if tpl := s.Templates[setHdr.SetId]; tpl != nil {
+				ds.Records = make([][]byte, len(tpl))
+				for i := range tpl {
+					var bs []byte
+					if tpl[i].Length == 65535 {
+						var bsRead int
+						bs, bsRead, err = s.readVariableLength()
+						if err != nil {
+							return
+						}
+						read += bsRead
+					} else {
+						bs = make([]byte, tpl[i].Length)
+						_, err = io.ReadFull(s.reader, bs)
+						if err != nil {
+							return
+						}
+						read += len(bs)
+					}
+					ds.Records[i] = bs
+				}
+			} else {
+				// Data set with unknown template
+				_, err = io.ReadFull(s.reader, make([]byte, setEndsAt-read))
+				if err != nil {
+					return
+				}
+				read += setEndsAt - read
+			}
+
+			dsets = append(dsets, ds)
 		}
 	}
 	return
@@ -214,8 +227,11 @@ func (s *Session) readTemplateSet() (ts *TemplateSet, read int, err error) {
 	return
 }
 
+// Reads a variable length information element. Returns a slice with the data
+// in it, the total number of bytes read and possibly an error.
 func (s *Session) readVariableLength() (bs []byte, r int, err error) {
 	var l int
+
 	var l0 uint8
 	err = binary.Read(s.reader, binary.BigEndian, &l0)
 	if err != nil {
