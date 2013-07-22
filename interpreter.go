@@ -6,8 +6,10 @@ import (
 	"fmt"
 )
 
+// IPFIX type of an Information Element ("Field").
 type FieldType string
 
+// The available field types as defined by RFC 5102.
 const (
 	Uint8                FieldType = "unsigned8"
 	Uint16               FieldType = "unsigned16"
@@ -31,6 +33,7 @@ const (
 	Ipv6Address          FieldType = "ipv6Address"
 )
 
+// DictionaryEntry provied a mapping between an (Enterprise, Field) pair and a Name and Type.
 type DictionaryEntry struct {
 	Name         string
 	FieldId      uint16
@@ -43,8 +46,9 @@ type dictionaryKey struct {
 	FieldId      uint16
 }
 
-type Dictionary map[dictionaryKey]DictionaryEntry
+type dictionary map[dictionaryKey]DictionaryEntry
 
+// Interpret a raw DataSet into a map if field name to cooked value.
 func (s *Session) Interpret(ds *DataSet) map[string]interface{} {
 	set := make(map[string]interface{})
 	tpl := s.Templates[ds.TemplateId]
@@ -71,6 +75,7 @@ func (s *Session) Interpret(ds *DataSet) map[string]interface{} {
 	return set
 }
 
+// Add a DictionaryEntry (containing a vendor field) to the dictionary used by Interpret.
 func (s *Session) AddDictionaryEntry(e DictionaryEntry) {
 	s.dictionary[dictionaryKey{e.EnterpriseId, e.FieldId}] = e
 }

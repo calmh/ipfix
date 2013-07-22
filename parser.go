@@ -7,6 +7,10 @@ import (
 	"io"
 )
 
+// The version field in IPFIX messages should always have the value 10. If it
+// does not, you get this error. It's probably a sign of a bug in the parser or
+// the exporter and that we have lost synchronization with the data stream.
+// Reestablishing the session is the only way forward at this point.
 var ErrVersion = errors.New("incorrect version field in message header - out of sync?")
 
 type Message struct {
@@ -57,7 +61,7 @@ type Session struct {
 	Templates  [][]TemplateRecord
 	reader     *bufio.Reader
 	minRecord  []uint16
-	dictionary Dictionary
+	dictionary dictionary
 }
 
 func NewSession(reader io.Reader) *Session {
