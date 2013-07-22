@@ -1,4 +1,4 @@
-ipfix
+ipfix [![Build Status](https://travis-ci.org/calmh/ipfixer.png?branch=master)](https://travis-ci.org/calmh/ipfix)
 =====
 
 Package ipfix implements an IPFIX (RFC 5101) parser and interpreter.
