@@ -48,10 +48,10 @@ type dictionaryKey struct {
 
 type dictionary map[dictionaryKey]DictionaryEntry
 
-// Interpret a raw DataSet into a map if field name to cooked value.
+// Interpret a raw DataSet into a map of field name => cooked value.
 func (s *Session) Interpret(ds *DataSet) map[string]interface{} {
 	set := make(map[string]interface{})
-	tpl := s.Templates[ds.TemplateId]
+	tpl := s.templates[ds.TemplateId]
 	if tpl == nil {
 		return nil
 	}

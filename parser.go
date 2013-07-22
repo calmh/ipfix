@@ -13,66 +13,78 @@ import (
 // Reestablishing the session is the only way forward at this point.
 var ErrVersion = errors.New("incorrect version field in message header - out of sync?")
 
+// A Message is the top level construct representing an IPFIX message. A well
+// formed message contains one or more sets of data or template information.
 type Message struct {
 	Header       MessageHeader
 	DataSets     []DataSet
 	TemplateSets []TemplateSet
 }
 
+// The MessageHeader provides metadata for the entire Message. The sequence
+// number and domain ID can be used to gain knowledge of messages lost on an
+// unreliable transport such as UDP.
 type MessageHeader struct {
-	Version        uint16
+	Version        uint16 // Always 0x0a
 	Length         uint16
-	ExportTime     uint32
+	ExportTime     uint32 // Epoch seconds
 	SequenceNumber uint32
 	DomainId       uint32
 }
 
-const messageHeaderLength int = 2 + 2 + 4 + 4 + 4
-
-type SetHeader struct {
+type setHeader struct {
 	SetId  uint16
 	Length uint16
 }
 
-const setHeaderLength = 2 + 2
+type templateHeader struct {
+	TemplateId uint16
+	FieldCount uint16
+}
 
+// The DataSet represents a single exported flow. The Records each describe
+// different aspects of the flow (source and destination address, counters,
+// service, etc.).
 type DataSet struct {
 	TemplateId uint16
 	Records    [][]byte
 }
 
+// The TemplateSet describes a data template, as used by DataSets.
 type TemplateSet struct {
-	TemplateHeader TemplateHeader
-	Records        []TemplateRecord
-}
-
-type TemplateHeader struct {
 	TemplateId uint16
-	FieldCount uint16
+	Records    []TemplateRecord
 }
 
+// The TemplateRecord describes the ID and size of the corresponding Records in a DataSet.
 type TemplateRecord struct {
 	EnterpriseId uint32
 	FieldId      uint16
 	Length       uint16
 }
 
+// The Session is the context for IPFIX messages.
 type Session struct {
-	Templates  [][]TemplateRecord
+	templates  [][]TemplateRecord
 	reader     *bufio.Reader
 	minRecord  []uint16
 	dictionary dictionary
 }
 
+// NewSession initializes a new Session based on the provided io.Reader.
 func NewSession(reader io.Reader) *Session {
 	s := Session{}
-	s.Templates = make([][]TemplateRecord, 65536)
+	s.templates = make([][]TemplateRecord, 65536)
 	s.reader = bufio.NewReaderSize(reader, 32768)
 	s.minRecord = make([]uint16, 65536)
 	s.dictionary = builtinDictionary
 	return &s
 }
 
+// ReadMessage extracts and returns one message from the IPFIX stream. As long
+// as err is nil, further messages can be read from the stream. Errors are not
+// recoverable -- once an error has been returned, ReadMessage should not be
+// called again on the same session.
 func (s *Session) ReadMessage() (msg *Message, err error) {
 	msg = &Message{}
 	msg.DataSets = make([]DataSet, 0)
@@ -87,7 +99,7 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 		err = ErrVersion
 		return
 	}
-	read := messageHeaderLength
+	read := binary.Size(msgHdr)
 	msg.Header = msgHdr
 
 	for read < int(msgHdr.Length) {
@@ -106,12 +118,12 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err
 	tsets = make([]TemplateSet, 0)
 	dsets = make([]DataSet, 0)
 
-	setHdr := SetHeader{}
+	setHdr := setHeader{}
 	err = binary.Read(s.reader, binary.BigEndian, &setHdr)
 	if err != nil {
 		return
 	}
-	read += setHeaderLength
+	read += binary.Size(setHdr)
 
 	end := int(setHdr.Length)
 	for read < end {
@@ -133,8 +145,8 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err
 			read += tsRead
 			tsets = append(tsets, *ts)
 
-			tid := ts.TemplateHeader.TemplateId
-			s.Templates[tid] = ts.Records
+			tid := ts.TemplateId
+			s.templates[tid] = ts.Records
 
 			var minLength uint16
 			for i := range ts.Records {
@@ -157,7 +169,7 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err
 			ds := DataSet{}
 			ds.TemplateId = setHdr.SetId
 
-			if tpl := s.Templates[setHdr.SetId]; tpl != nil {
+			if tpl := s.templates[setHdr.SetId]; tpl != nil {
 				ds.Records = make([][]byte, len(tpl))
 				for i := range tpl {
 					var bs []byte
@@ -195,13 +207,14 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err
 
 func (s *Session) readTemplateSet() (ts *TemplateSet, read int, err error) {
 	ts = &TemplateSet{}
-	th := TemplateHeader{}
+	th := templateHeader{}
 	err = binary.Read(s.reader, binary.BigEndian, &th)
 	if err != nil {
 		return
 	}
 	read = binary.Size(th)
 
+	ts.TemplateId = th.TemplateId
 	ts.Records = make([]TemplateRecord, th.FieldCount)
 	for i := 0; i < int(th.FieldCount); i++ {
 		f := TemplateRecord{}
@@ -226,7 +239,6 @@ func (s *Session) readTemplateSet() (ts *TemplateSet, read int, err error) {
 		ts.Records[i] = f
 	}
 
-	ts.TemplateHeader = th
 	return
 }
 

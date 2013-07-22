@@ -36,10 +36,10 @@ func TestParseTemplateSet(t *testing.T) {
 	compare(t, "msg.Header.Version", msg.Header.Version, uint(0xa))
 	compare(t, "len(DataSets)", len(msg.DataSets), 0)
 	compare(t, "len(TemplateSets)", len(msg.TemplateSets), 2)
-	compare(t, "TemplateSets[0].TemplateHeader.TemplateId",
-		msg.TemplateSets[0].TemplateHeader.TemplateId, uint16(10299))
-	compare(t, "TemplateSets[1].TemplateHeader.TemplateId",
-		msg.TemplateSets[1].TemplateHeader.TemplateId, uint16(49836))
+	compare(t, "TemplateSets[0].TemplateId",
+		msg.TemplateSets[0].TemplateId, uint16(10299))
+	compare(t, "TemplateSets[1].TemplateId",
+		msg.TemplateSets[1].TemplateId, uint16(49836))
 }
 
 func TestParseDataSet(t *testing.T) {
