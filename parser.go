@@ -23,23 +23,18 @@ type MessageHeader struct {
 	DomainId       uint32
 }
 
-const MessageHeaderLength int = 2 + 2 + 4 + 4 + 4
+const messageHeaderLength int = 2 + 2 + 4 + 4 + 4
 
 type SetHeader struct {
 	SetId  uint16
 	Length uint16
 }
 
-const SetHeaderLength = 2 + 2
+const setHeaderLength = 2 + 2
 
 type DataSet struct {
 	TemplateId uint16
 	Records    [][]byte
-}
-
-type FieldKey struct {
-	EnterpriseId uint32
-	FieldId      uint16
 }
 
 type TemplateSet struct {
@@ -59,9 +54,10 @@ type TemplateRecord struct {
 }
 
 type Session struct {
-	Templates [][]TemplateRecord
-	reader    *bufio.Reader
-	minRecord []uint16
+	Templates  [][]TemplateRecord
+	reader     *bufio.Reader
+	minRecord  []uint16
+	dictionary Dictionary
 }
 
 func NewSession(reader io.Reader) *Session {
@@ -69,6 +65,7 @@ func NewSession(reader io.Reader) *Session {
 	s.Templates = make([][]TemplateRecord, 65536)
 	s.reader = bufio.NewReaderSize(reader, 32768)
 	s.minRecord = make([]uint16, 65536)
+	s.dictionary = builtinDictionary
 	return &s
 }
 
@@ -86,18 +83,11 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 		err = ErrVersion
 		return
 	}
-	read := MessageHeaderLength
+	read := messageHeaderLength
 	msg.Header = msgHdr
 
 	for read < int(msgHdr.Length) {
-		setHdr := SetHeader{}
-		err = binary.Read(s.reader, binary.BigEndian, &setHdr)
-		if err != nil {
-			return
-		}
-		read += SetHeaderLength
-
-		tsets, dsets, tr, err := s.readSet(setHdr)
+		tsets, dsets, tr, err := s.readSet()
 		if err != nil {
 			return nil, err
 		}
@@ -108,18 +98,26 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 	return
 }
 
-func (s *Session) readSet(setHdr SetHeader) (tsets []TemplateSet, dsets []DataSet, read int, err error) {
+func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err error) {
 	tsets = make([]TemplateSet, 0)
 	dsets = make([]DataSet, 0)
-	setEndsAt := int(setHdr.Length) - SetHeaderLength
-	for read < setEndsAt {
-		if setEndsAt-read < int(s.minRecord[setHdr.SetId]) {
+
+	setHdr := SetHeader{}
+	err = binary.Read(s.reader, binary.BigEndian, &setHdr)
+	if err != nil {
+		return
+	}
+	read += setHeaderLength
+
+	end := int(setHdr.Length)
+	for read < end {
+		if end-read < int(s.minRecord[setHdr.SetId]) {
 			// Padding
-			_, err = io.ReadFull(s.reader, make([]byte, setEndsAt-read))
+			_, err = io.ReadFull(s.reader, make([]byte, end-read))
 			if err != nil {
 				return
 			}
-			read += setEndsAt - read
+			read += end - read
 		} else if setHdr.SetId == 2 {
 			// Template Set
 			var ts *TemplateSet
@@ -145,11 +143,11 @@ func (s *Session) readSet(setHdr SetHeader) (tsets []TemplateSet, dsets []DataSe
 			}
 		} else if setHdr.SetId == 3 {
 			// Options Template Set, not handled
-			_, err = io.ReadFull(s.reader, make([]byte, setEndsAt-read))
+			_, err = io.ReadFull(s.reader, make([]byte, end-read))
 			if err != nil {
 				return
 			}
-			read += setEndsAt - read
+			read += end - read
 		} else {
 			// Data Set
 			ds := DataSet{}
@@ -178,11 +176,11 @@ func (s *Session) readSet(setHdr SetHeader) (tsets []TemplateSet, dsets []DataSe
 				}
 			} else {
 				// Data set with unknown template
-				_, err = io.ReadFull(s.reader, make([]byte, setEndsAt-read))
+				_, err = io.ReadFull(s.reader, make([]byte, end-read))
 				if err != nil {
 					return
 				}
-				read += setEndsAt - read
+				read += end - read
 			}
 
 			dsets = append(dsets, ds)
@@ -213,7 +211,8 @@ func (s *Session) readTemplateSet() (ts *TemplateSet, read int, err error) {
 			return
 		}
 		read += binary.Size(f.Length)
-		if f.FieldId >= 8192 {
+		if f.FieldId >= 0x8000 {
+			f.FieldId -= 0x8000
 			err = binary.Read(s.reader, binary.BigEndian, &f.EnterpriseId)
 			if err != nil {
 				return
