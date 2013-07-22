@@ -59,7 +59,7 @@ func (s *Session) Interpret(ds *DataSet) map[string]interface{} {
 		entry, ok := s.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]
 		if !ok {
 			name = fmt.Sprintf("F[%d.%d]", field.EnterpriseId, field.FieldId)
-			value = ds.Records[i] // Unchanged
+			value = integers(ds.Records[i])
 		} else {
 			name = entry.Name
 			value = interpretBytes(ds.Records[i], entry.Type)

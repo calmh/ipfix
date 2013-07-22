@@ -1,11 +1,11 @@
 package ipfix_test
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
-	"testing"
 	"github.com/calmh/ipfix"
-	"bytes"
+	"testing"
 )
 
 func compare(t *testing.T, msg string, a, b interface{}) {
@@ -77,4 +77,3 @@ func TestParseDataSet(t *testing.T) {
 	compare(t, "len(DataSets)", len(msg.DataSets), 31)
 	compare(t, "len(TemplateSets)", len(msg.TemplateSets), 0)
 }
-
