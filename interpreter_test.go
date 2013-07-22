@@ -8,7 +8,7 @@ func TestInterpretUint(t *testing.T) {
 	bs := []byte{0xf7, 2, 3, 4, 5, 6, 7, 8}
 	v := interpretBytes(bs, Uint64)
 	if v != uint64(0xf702030405060708) {
-		t.Errorf("%d != %d", v, 0x0102030405060708)
+		t.Errorf("%d != %d", v, uint64(0x0102030405060708))
 	}
 
 	bs = []byte{0xf7, 2, 3, 4}
@@ -34,7 +34,7 @@ func TestInterpretInt(t *testing.T) {
 	bs := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	v := interpretBytes(bs, Int64)
 	if v != int64(0x0102030405060708) {
-		t.Errorf("%d != %d", v, 0x0102030405060708)
+		t.Errorf("%d != %d", v, uint64(0x0102030405060708))
 	}
 
 	bs = []byte{1, 2, 3, 4}

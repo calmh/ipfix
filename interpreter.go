@@ -129,9 +129,8 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 			int(bs[10])<<8+int(bs[11]),
 			int(bs[12])<<8+int(bs[13]),
 			int(bs[14])<<8+int(bs[15]))
-	default:
-		return integers(bs)
 	}
+	return integers(bs)
 }
 
 func integers(s []byte) []int {
