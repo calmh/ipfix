@@ -18,14 +18,14 @@ ReadMessage repeatedly.
 			panic(err)
 		}
 
-		for _, ds := range msg.DataSets {
-			// ds contains raw enterpriseId, fieldId => []byte information
-			fmt.Println(ds)
+		for _, record := range msg.DataRecords {
+			// record contains raw enterpriseId, fieldId => []byte information
+			fmt.Println(record)
 
+			fieldsMap := s.Interpret(&record)
 			// fieldsMap is a map[string]interface{}, with types
 			// resolved to their natural equivalents and field
 			// names resolved for standard fields.
-			fieldsMap := s.Interpret(&ds)
 			fmt.Println(fieldsMap)
 		}
 	}
