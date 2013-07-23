@@ -1,7 +1,6 @@
 package ipfix
 
 import (
-	"bufio"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -67,7 +66,7 @@ type TemplateRecord struct {
 // The Session is the context for IPFIX messages.
 type Session struct {
 	templates  [][]TemplateRecord
-	reader     *bufio.Reader
+	reader     io.Reader
 	minRecord  []uint16
 	dictionary dictionary
 	bytesRead  int
@@ -77,7 +76,7 @@ type Session struct {
 func NewSession(reader io.Reader) *Session {
 	s := Session{}
 	s.templates = make([][]TemplateRecord, 65536)
-	s.reader = bufio.NewReaderSize(reader, 32768)
+	s.reader = reader
 	s.minRecord = make([]uint16, 65536)
 	s.dictionary = builtinDictionary
 	return &s
