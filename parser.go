@@ -148,15 +148,20 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int) {
 			read += end - read
 		} else if setHdr.SetId == 2 {
 			// Template Set
-			var ts *TemplateSet
-			var tsRead int
-			ts, tsRead = s.readTemplateSet()
+			ts, tsRead := s.readTemplateSet()
 			read += tsRead
 			tsets = append(tsets, *ts)
 
+			// Update the template cache
 			tid := ts.TemplateId
-			s.templates[tid] = ts.Records
+			if len(ts.Records) == 0 {
+				// Set was withdrawn
+				s.templates[tid] = nil
+			} else {
+				s.templates[tid] = ts.Records
+			}
 
+			// Update the minimum record length cache
 			var minLength uint16
 			for i := range ts.Records {
 				if ts.Records[i].Length == 65535 {
@@ -164,44 +169,51 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int) {
 				} else {
 					minLength += ts.Records[i].Length
 				}
-				s.minRecord[i] = minLength
 			}
+			s.minRecord[tid] = minLength
 		} else if setHdr.SetId == 3 {
 			// Options Template Set, not handled
 			_, err = io.ReadFull(s.reader, make([]byte, end-read))
 			s.errorIf(err)
 			read += end - read
 		} else {
-			// Data Set
-			ds := DataSet{}
-			ds.TemplateId = setHdr.SetId
-
 			if tpl := s.templates[setHdr.SetId]; tpl != nil {
-				ds.Records = make([][]byte, len(tpl))
-				for i := range tpl {
-					var bs []byte
-					if tpl[i].Length == 65535 {
-						var bsRead int
-						bs, bsRead = s.readVariableLength()
-						read += bsRead
-					} else {
-						bs = make([]byte, tpl[i].Length)
-						_, err = io.ReadFull(s.reader, bs)
-						s.errorIf(err)
-						read += len(bs)
-					}
-					ds.Records[i] = bs
-				}
+				// Data set
+				ds, dsRead := s.readDataSet(tpl)
+				read += dsRead
+				ds.TemplateId = setHdr.SetId
+				dsets = append(dsets, *ds)
 			} else {
 				// Data set with unknown template
-				_, err = io.ReadFull(s.reader, make([]byte, end-read))
+				_, err := io.ReadFull(s.reader, make([]byte, end-read))
 				s.errorIf(err)
 				read += end - read
 			}
-
-			dsets = append(dsets, ds)
 		}
 	}
+	return
+}
+
+
+func (s *Session) readDataSet(tpl []TemplateRecord) (ds *DataSet, read int) {
+	ds = &DataSet{}
+
+	ds.Records = make([][]byte, len(tpl))
+	for i := range tpl {
+		var bs []byte
+		if tpl[i].Length == 65535 {
+			var bsRead int
+			bs, bsRead = s.readVariableLength()
+			read += bsRead
+		} else {
+			bs = make([]byte, tpl[i].Length)
+			_, err := io.ReadFull(s.reader, bs)
+			s.errorIf(err)
+			read += len(bs)
+		}
+		ds.Records[i] = bs
+	}
+
 	return
 }
 
