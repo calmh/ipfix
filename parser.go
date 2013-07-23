@@ -82,6 +82,10 @@ func NewSession(reader io.Reader) *Session {
 	return &s
 }
 
+var msgHeaderLength = binary.Size(MessageHeader{})
+var setHeaderLength = binary.Size(setHeader{})
+var templateHeaderLength = binary.Size(templateHeader{})
+
 // ReadMessage extracts and returns one message from the IPFIX stream. As long
 // as err is nil, further messages can be read from the stream. Errors are not
 // recoverable -- once an error has been returned, ReadMessage should not be
@@ -108,7 +112,7 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 	if msgHdr.Version != 10 {
 		s.errorIf(ErrVersion)
 	}
-	read := binary.Size(msgHdr)
+	read := msgHeaderLength
 	msg.Header = msgHdr
 
 	for read < int(msgHdr.Length) {
@@ -133,7 +137,7 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int) {
 	setHdr := setHeader{}
 	err := binary.Read(s.reader, binary.BigEndian, &setHdr)
 	s.errorIf(err)
-	read += binary.Size(setHdr)
+	read += setHeaderLength
 
 	end := int(setHdr.Length)
 	for read < end {
@@ -206,7 +210,7 @@ func (s *Session) readTemplateSet() (ts *TemplateSet, read int) {
 	th := templateHeader{}
 	err := binary.Read(s.reader, binary.BigEndian, &th)
 	s.errorIf(err)
-	read = binary.Size(th)
+	read = templateHeaderLength
 
 	ts.TemplateId = th.TemplateId
 	ts.Records = make([]TemplateRecord, th.FieldCount)
@@ -214,15 +218,15 @@ func (s *Session) readTemplateSet() (ts *TemplateSet, read int) {
 		f := TemplateRecord{}
 		err = binary.Read(s.reader, binary.BigEndian, &f.FieldId)
 		s.errorIf(err)
-		read += binary.Size(f.FieldId)
+		read += 2
 		err = binary.Read(s.reader, binary.BigEndian, &f.Length)
 		s.errorIf(err)
-		read += binary.Size(f.Length)
+		read += 2
 		if f.FieldId >= 0x8000 {
 			f.FieldId -= 0x8000
 			err = binary.Read(s.reader, binary.BigEndian, &f.EnterpriseId)
 			s.errorIf(err)
-			read += binary.Size(f.EnterpriseId)
+			read += 4
 		}
 		ts.Records[i] = f
 	}
