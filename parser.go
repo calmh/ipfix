@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"runtime"
 )
 
 // The version field in IPFIX messages should always have the value 10. If it
@@ -86,27 +87,32 @@ func NewSession(reader io.Reader) *Session {
 // recoverable -- once an error has been returned, ReadMessage should not be
 // called again on the same session.
 func (s *Session) ReadMessage() (msg *Message, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(runtime.Error); ok {
+				panic(r)
+			}
+
+			msg = nil
+			err = r.(error)
+		}
+	}()
+
 	msg = &Message{}
 	msg.DataSets = make([]DataSet, 0)
 	msg.TemplateSets = make([]TemplateSet, 0)
 
 	msgHdr := MessageHeader{}
 	err = binary.Read(s.reader, binary.BigEndian, &msgHdr)
-	if err != nil {
-		return
-	}
+	s.errorIf(err)
 	if msgHdr.Version != 10 {
-		err = ErrVersion
-		return
+		s.errorIf(ErrVersion)
 	}
 	read := binary.Size(msgHdr)
 	msg.Header = msgHdr
 
 	for read < int(msgHdr.Length) {
-		tsets, dsets, tr, err := s.readSet()
-		if err != nil {
-			return nil, err
-		}
+		tsets, dsets, tr := s.readSet()
 		read += tr
 		msg.TemplateSets = append(msg.TemplateSets, tsets...)
 		msg.DataSets = append(msg.DataSets, dsets...)
@@ -114,15 +120,19 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 	return
 }
 
-func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err error) {
+func (s *Session) errorIf(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int) {
 	tsets = make([]TemplateSet, 0)
 	dsets = make([]DataSet, 0)
 
 	setHdr := setHeader{}
-	err = binary.Read(s.reader, binary.BigEndian, &setHdr)
-	if err != nil {
-		return
-	}
+	err := binary.Read(s.reader, binary.BigEndian, &setHdr)
+	s.errorIf(err)
 	read += binary.Size(setHdr)
 
 	end := int(setHdr.Length)
@@ -130,18 +140,13 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err
 		if end-read < int(s.minRecord[setHdr.SetId]) {
 			// Padding
 			_, err = io.ReadFull(s.reader, make([]byte, end-read))
-			if err != nil {
-				return
-			}
+			s.errorIf(err)
 			read += end - read
 		} else if setHdr.SetId == 2 {
 			// Template Set
 			var ts *TemplateSet
 			var tsRead int
-			ts, tsRead, err = s.readTemplateSet()
-			if err != nil {
-				return
-			}
+			ts, tsRead = s.readTemplateSet()
 			read += tsRead
 			tsets = append(tsets, *ts)
 
@@ -160,9 +165,7 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err
 		} else if setHdr.SetId == 3 {
 			// Options Template Set, not handled
 			_, err = io.ReadFull(s.reader, make([]byte, end-read))
-			if err != nil {
-				return
-			}
+			s.errorIf(err)
 			read += end - read
 		} else {
 			// Data Set
@@ -175,17 +178,12 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err
 					var bs []byte
 					if tpl[i].Length == 65535 {
 						var bsRead int
-						bs, bsRead, err = s.readVariableLength()
-						if err != nil {
-							return
-						}
+						bs, bsRead = s.readVariableLength()
 						read += bsRead
 					} else {
 						bs = make([]byte, tpl[i].Length)
 						_, err = io.ReadFull(s.reader, bs)
-						if err != nil {
-							return
-						}
+						s.errorIf(err)
 						read += len(bs)
 					}
 					ds.Records[i] = bs
@@ -193,9 +191,7 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err
 			} else {
 				// Data set with unknown template
 				_, err = io.ReadFull(s.reader, make([]byte, end-read))
-				if err != nil {
-					return
-				}
+				s.errorIf(err)
 				read += end - read
 			}
 
@@ -205,13 +201,11 @@ func (s *Session) readSet() (tsets []TemplateSet, dsets []DataSet, read int, err
 	return
 }
 
-func (s *Session) readTemplateSet() (ts *TemplateSet, read int, err error) {
+func (s *Session) readTemplateSet() (ts *TemplateSet, read int) {
 	ts = &TemplateSet{}
 	th := templateHeader{}
-	err = binary.Read(s.reader, binary.BigEndian, &th)
-	if err != nil {
-		return
-	}
+	err := binary.Read(s.reader, binary.BigEndian, &th)
+	s.errorIf(err)
 	read = binary.Size(th)
 
 	ts.TemplateId = th.TemplateId
@@ -219,21 +213,15 @@ func (s *Session) readTemplateSet() (ts *TemplateSet, read int, err error) {
 	for i := 0; i < int(th.FieldCount); i++ {
 		f := TemplateRecord{}
 		err = binary.Read(s.reader, binary.BigEndian, &f.FieldId)
-		if err != nil {
-			return
-		}
+		s.errorIf(err)
 		read += binary.Size(f.FieldId)
 		err = binary.Read(s.reader, binary.BigEndian, &f.Length)
-		if err != nil {
-			return
-		}
+		s.errorIf(err)
 		read += binary.Size(f.Length)
 		if f.FieldId >= 0x8000 {
 			f.FieldId -= 0x8000
 			err = binary.Read(s.reader, binary.BigEndian, &f.EnterpriseId)
-			if err != nil {
-				return
-			}
+			s.errorIf(err)
 			read += binary.Size(f.EnterpriseId)
 		}
 		ts.Records[i] = f
@@ -243,15 +231,13 @@ func (s *Session) readTemplateSet() (ts *TemplateSet, read int, err error) {
 }
 
 // Reads a variable length information element. Returns a slice with the data
-// in it, the total number of bytes read and possibly an error.
-func (s *Session) readVariableLength() (bs []byte, r int, err error) {
+// in it, the total number of bytes read.
+func (s *Session) readVariableLength() (bs []byte, r int) {
 	var l int
 
 	var l0 uint8
-	err = binary.Read(s.reader, binary.BigEndian, &l0)
-	if err != nil {
-		return
-	}
+	err := binary.Read(s.reader, binary.BigEndian, &l0)
+	s.errorIf(err)
 	r += 1
 
 	if l0 < 255 {
@@ -259,18 +245,14 @@ func (s *Session) readVariableLength() (bs []byte, r int, err error) {
 	} else {
 		var l1 uint16
 		err = binary.Read(s.reader, binary.BigEndian, &l1)
-		if err != nil {
-			return
-		}
+		s.errorIf(err)
 		r += 2
 		l = int(l1)
 	}
 
 	bs = make([]byte, l)
 	_, err = io.ReadFull(s.reader, bs)
-	if err != nil {
-		return
-	}
+	s.errorIf(err)
 	r += len(bs)
 
 	return

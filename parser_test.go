@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/calmh/ipfix"
 	"testing"
+	"io"
 )
 
 func compare(t *testing.T, msg string, a, b interface{}) {
@@ -76,4 +77,20 @@ func TestParseDataSet(t *testing.T) {
 
 	compare(t, "len(DataSets)", len(msg.DataSets), 31)
 	compare(t, "len(TemplateSets)", len(msg.TemplateSets), 0)
+}
+
+func TestEOFError(t *testing.T) {
+	truncated, _ := hex.DecodeString("000a008c51ec4264000000000b20bdbe0002007c283b0008001c0010800c000400003c258003000800003c258004000800003c258012ffff00003c258001ffff00003c25801cffff00003c25001b0010c2ac0008000c0004800c000400003c258003000800003c258004000800003c258")
+	b := bytes.Buffer{}
+	p := ipfix.NewSession(&b)
+
+	b.Write(truncated)
+
+	msg, err := p.ReadMessage()
+	if msg != nil {
+		t.Errorf("Received msg %v even though we should have errored out", msg)
+	}
+	if err != io.EOF {
+		t.Errorf("Received %v instead of io.EOF error", err)
+	}
 }
