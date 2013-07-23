@@ -16,9 +16,9 @@ var ErrVersion = errors.New("incorrect version field in message header - out of 
 // A Message is the top level construct representing an IPFIX message. A well
 // formed message contains one or more sets of data or template information.
 type Message struct {
-	Header       MessageHeader
-	DataSets     []DataSet
-	TemplateSets []TemplateSet
+	Header          MessageHeader
+	DataRecords     []DataRecord
+	TemplateRecords []TemplateRecord
 }
 
 // The MessageHeader provides metadata for the entire Message. The sequence
@@ -42,22 +42,23 @@ type templateHeader struct {
 	FieldCount uint16
 }
 
-// The DataSet represents a single exported flow. The Records each describe
+// The DataRecord represents a single exported flow. The Fields each describe
 // different aspects of the flow (source and destination address, counters,
 // service, etc.).
-type DataSet struct {
+type DataRecord struct {
 	TemplateId uint16
-	Records    [][]byte
+	Fields     [][]byte
 }
 
-// The TemplateSet describes a data template, as used by DataSets.
-type TemplateSet struct {
-	TemplateId uint16
-	Records    []TemplateRecord
-}
-
-// The TemplateRecord describes the ID and size of the corresponding Records in a DataSet.
+// The TemplateRecord describes a data template, as used by DataRecords.
 type TemplateRecord struct {
+	TemplateId      uint16
+	FieldSpecifiers []TemplateFieldSpecifier
+}
+
+// The TemplateFieldSpecifier describes the ID and size of the corresponding
+// Fields in a DataRecord.
+type TemplateFieldSpecifier struct {
 	EnterpriseId uint32
 	FieldId      uint16
 	Length       uint16
@@ -65,17 +66,17 @@ type TemplateRecord struct {
 
 // The Session is the context for IPFIX messages.
 type Session struct {
-	templates  [][]TemplateRecord
+	templates  [][]TemplateFieldSpecifier
 	reader     io.Reader
 	minRecord  []uint16
-	dictionary dictionary
+	dictionary fieldDictionary
 	bytesRead  int
 }
 
 // NewSession initializes a new Session based on the provided io.Reader.
 func NewSession(reader io.Reader) *Session {
 	s := Session{}
-	s.templates = make([][]TemplateRecord, 65536)
+	s.templates = make([][]TemplateFieldSpecifier, 65536)
 	s.reader = reader
 	s.minRecord = make([]uint16, 65536)
 	s.dictionary = builtinDictionary
@@ -104,8 +105,8 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 
 	s.bytesRead = 0
 	msg = &Message{}
-	msg.DataSets = make([]DataSet, 0)
-	msg.TemplateSets = make([]TemplateSet, 0)
+	msg.DataRecords = make([]DataRecord, 0)
+	msg.TemplateRecords = make([]TemplateRecord, 0)
 
 	msgHdr := MessageHeader{}
 	err = binary.Read(s.reader, binary.BigEndian, &msgHdr)
@@ -117,9 +118,9 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 	msg.Header = msgHdr
 
 	for s.bytesRead < int(msgHdr.Length) {
-		tsets, dsets := s.readSet()
-		msg.TemplateSets = append(msg.TemplateSets, tsets...)
-		msg.DataSets = append(msg.DataSets, dsets...)
+		trecs, drecs := s.readSet()
+		msg.TemplateRecords = append(msg.TemplateRecords, trecs...)
+		msg.DataRecords = append(msg.DataRecords, drecs...)
 	}
 
 	return
@@ -131,9 +132,9 @@ func (s *Session) errorIf(err error) {
 	}
 }
 
-func (s *Session) readSet() ([]TemplateSet, []DataSet) {
-	tsets := make([]TemplateSet, 0)
-	dsets := make([]DataSet, 0)
+func (s *Session) readSet() ([]TemplateRecord, []DataRecord) {
+	trecs := make([]TemplateRecord, 0)
+	drecs := make([]DataRecord, 0)
 
 	setHdr := setHeader{}
 	err := binary.Read(s.reader, binary.BigEndian, &setHdr)
@@ -150,83 +151,75 @@ func (s *Session) readSet() ([]TemplateSet, []DataSet) {
 			s.bytesRead = end
 		} else if setHdr.SetId == 2 {
 			// Template Set
-			ts := s.readTemplateSet()
-			tsets = append(tsets, *ts)
+			ts := s.readTemplateRecord()
+			trecs = append(trecs, *ts)
 
 			// Update the template cache
 			tid := ts.TemplateId
-			if len(ts.Records) == 0 {
+			if len(ts.FieldSpecifiers) == 0 {
 				// Set was withdrawn
 				s.templates[tid] = nil
 			} else {
-				s.templates[tid] = ts.Records
+				s.templates[tid] = ts.FieldSpecifiers
 			}
 
 			// Update the minimum record length cache
 			var minLength uint16
-			for i := range ts.Records {
-				if ts.Records[i].Length == 65535 {
+			for i := range ts.FieldSpecifiers {
+				if ts.FieldSpecifiers[i].Length == 65535 {
 					minLength += 1
 				} else {
-					minLength += ts.Records[i].Length
+					minLength += ts.FieldSpecifiers[i].Length
 				}
 			}
 			s.minRecord[tid] = minLength
 		} else if setHdr.SetId == 3 {
 			// Options Template Set, not handled
-			s.readFull(end - s.bytesRead)
+			s.readFixedLength(end - s.bytesRead)
 		} else {
 			if tpl := s.templates[setHdr.SetId]; tpl != nil {
 				// Data set
-				ds := s.readDataSet(tpl)
+				ds := s.readDataRecord(tpl)
 				ds.TemplateId = setHdr.SetId
-				dsets = append(dsets, *ds)
+				drecs = append(drecs, *ds)
 			} else {
 				// Data set with unknown template
-				s.readFull(end - s.bytesRead)
+				s.readFixedLength(end - s.bytesRead)
 			}
 		}
 	}
 
-	return tsets, dsets
+	return trecs, drecs
 }
 
-func (s *Session) readFull(n int) []byte {
-	bs := make([]byte, n)
-	_, err := io.ReadFull(s.reader, bs)
-	s.errorIf(err)
-	s.bytesRead += len(bs)
-	return bs
-}
-
-func (s *Session) readDataSet(tpl []TemplateRecord) *DataSet {
-	ds := DataSet{}
-	ds.Records = make([][]byte, len(tpl))
+func (s *Session) readDataRecord(tpl []TemplateFieldSpecifier) *DataRecord {
+	ds := DataRecord{}
+	ds.Fields = make([][]byte, len(tpl))
 
 	for i := range tpl {
 		var bs []byte
 		if tpl[i].Length == 65535 {
 			bs = s.readVariableLength()
 		} else {
-			bs = s.readFull(int(tpl[i].Length))
+			bs = s.readFixedLength(int(tpl[i].Length))
 		}
-		ds.Records[i] = bs
+		ds.Fields[i] = bs
 	}
 
 	return &ds
 }
 
-func (s *Session) readTemplateSet() *TemplateSet {
-	ts := TemplateSet{}
+func (s *Session) readTemplateRecord() *TemplateRecord {
+	ts := TemplateRecord{}
 	th := templateHeader{}
 	err := binary.Read(s.reader, binary.BigEndian, &th)
 	s.errorIf(err)
 	s.bytesRead += templateHeaderLength
 
 	ts.TemplateId = th.TemplateId
-	ts.Records = make([]TemplateRecord, th.FieldCount)
+	ts.FieldSpecifiers = make([]TemplateFieldSpecifier, th.FieldCount)
 	for i := 0; i < int(th.FieldCount); i++ {
-		f := TemplateRecord{}
+		f := TemplateFieldSpecifier{}
 		err = binary.Read(s.reader, binary.BigEndian, &f.FieldId)
 		s.errorIf(err)
 		s.bytesRead += 2
@@ -239,10 +232,18 @@ func (s *Session) readTemplateSet() *TemplateSet {
 			s.errorIf(err)
 			s.bytesRead += 4
 		}
-		ts.Records[i] = f
+		ts.FieldSpecifiers[i] = f
 	}
 
 	return &ts
+}
+
+func (s *Session) readFixedLength(n int) []byte {
+	bs := make([]byte, n)
+	_, err := io.ReadFull(s.reader, bs)
+	s.errorIf(err)
+	s.bytesRead += len(bs)
+	return bs
 }
 
 func (s *Session) readVariableLength() []byte {
@@ -263,5 +264,5 @@ func (s *Session) readVariableLength() []byte {
 		l = int(l1)
 	}
 
-	return s.readFull(l)
+	return s.readFixedLength(l)
 }

@@ -5,8 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/calmh/ipfix"
-	"testing"
 	"io"
+	"testing"
 )
 
 func compare(t *testing.T, msg string, a, b interface{}) {
@@ -35,12 +35,12 @@ func TestParseTemplateSet(t *testing.T) {
 	}
 
 	compare(t, "msg.Header.Version", msg.Header.Version, uint(0xa))
-	compare(t, "len(DataSets)", len(msg.DataSets), 0)
-	compare(t, "len(TemplateSets)", len(msg.TemplateSets), 2)
-	compare(t, "TemplateSets[0].TemplateId",
-		msg.TemplateSets[0].TemplateId, uint16(10299))
-	compare(t, "TemplateSets[1].TemplateId",
-		msg.TemplateSets[1].TemplateId, uint16(49836))
+	compare(t, "len(DataRecords)", len(msg.DataRecords), 0)
+	compare(t, "len(TemplateRecords)", len(msg.TemplateRecords), 2)
+	compare(t, "TemplateRecords[0].TemplateId",
+		msg.TemplateRecords[0].TemplateId, uint16(10299))
+	compare(t, "TemplateRecords[1].TemplateId",
+		msg.TemplateRecords[1].TemplateId, uint16(49836))
 }
 
 func TestParseDataSet(t *testing.T) {
@@ -59,24 +59,24 @@ func TestParseDataSet(t *testing.T) {
 		t.Error("ReadMessage failed", err)
 	}
 
-	compare(t, "len(DataSets)", len(msg.DataSets), 0)
-	compare(t, "len(TemplateSets)", len(msg.TemplateSets), 0)
+	compare(t, "len(DataRecords)", len(msg.DataRecords), 0)
+	compare(t, "len(TemplateRecords)", len(msg.TemplateRecords), 0)
 
 	msg, err = p.ReadMessage()
 	if msg == nil || err != nil {
 		t.Error("ReadMessage failed", err)
 	}
 
-	compare(t, "len(DataSets)", len(msg.DataSets), 0)
-	compare(t, "len(TemplateSets)", len(msg.TemplateSets), 2)
+	compare(t, "len(DataRecords)", len(msg.DataRecords), 0)
+	compare(t, "len(TemplateRecords)", len(msg.TemplateRecords), 2)
 
 	msg, err = p.ReadMessage()
 	if msg == nil || err != nil {
 		t.Error("ReadMessage failed", err)
 	}
 
-	compare(t, "len(DataSets)", len(msg.DataSets), 31)
-	compare(t, "len(TemplateSets)", len(msg.TemplateSets), 0)
+	compare(t, "len(DataRecords)", len(msg.DataRecords), 31)
+	compare(t, "len(TemplateRecords)", len(msg.TemplateRecords), 0)
 }
 
 func TestEOFError(t *testing.T) {

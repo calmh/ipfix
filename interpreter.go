@@ -46,10 +46,10 @@ type dictionaryKey struct {
 	FieldId      uint16
 }
 
-type dictionary map[dictionaryKey]DictionaryEntry
+type fieldDictionary map[dictionaryKey]DictionaryEntry
 
-// Interpret a raw DataSet into a map of field name => cooked value.
-func (s *Session) Interpret(ds *DataSet) map[string]interface{} {
+// Interpret a raw DataRecord into a map of field name => cooked value.
+func (s *Session) Interpret(ds *DataRecord) map[string]interface{} {
 	set := make(map[string]interface{})
 	tpl := s.templates[ds.TemplateId]
 	if tpl == nil {
@@ -63,10 +63,10 @@ func (s *Session) Interpret(ds *DataSet) map[string]interface{} {
 		entry, ok := s.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]
 		if !ok {
 			name = fmt.Sprintf("F[%d.%d]", field.EnterpriseId, field.FieldId)
-			value = integers(ds.Records[i])
+			value = integers(ds.Fields[i])
 		} else {
 			name = entry.Name
-			value = interpretBytes(ds.Records[i], entry.Type)
+			value = interpretBytes(ds.Fields[i], entry.Type)
 		}
 
 		set[name] = value
