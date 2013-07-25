@@ -48,31 +48,43 @@ type dictionaryKey struct {
 
 type fieldDictionary map[dictionaryKey]DictionaryEntry
 
-// Interpret a raw DataRecord into a map of field name => cooked value.
-func (s *Session) Interpret(ds *DataRecord) map[string]interface{} {
-	set := make(map[string]interface{})
+// An InterpretedField is a field with the field name filled in and the value
+// converted to the appropriate type.  If this is not possible (because the
+// name and type of the field is unknown at the time of interpretation), Name
+// will be the empty string, Value will be a nil interface and RawValue will
+// contain the original bytes.
+type InterpretedField struct {
+	Name         string
+	EnterpriseId uint32
+	FieldId      uint16
+	Value        interface{}
+	RawValue     []byte
+}
+
+// Interpret a raw DataRecord into a list of InterpretedFields.
+func (s *Session) Interpret(ds *DataRecord) []InterpretedField {
 	tpl := s.templates[ds.TemplateId]
 	if tpl == nil {
 		return nil
 	}
 
+	fieldList := make([]InterpretedField, len(tpl))
+
 	for i, field := range tpl {
-		var name string
-		var value interface{}
+		intf := InterpretedField{FieldId: field.FieldId, EnterpriseId: field.EnterpriseId}
 
 		entry, ok := s.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]
 		if !ok {
-			name = fmt.Sprintf("F[%d.%d]", field.EnterpriseId, field.FieldId)
-			value = integers(ds.Fields[i])
+			intf.RawValue = ds.Fields[i]
 		} else {
-			name = entry.Name
-			value = interpretBytes(ds.Fields[i], entry.Type)
+			intf.Name = entry.Name
+			intf.Value = interpretBytes(ds.Fields[i], entry.Type)
 		}
 
-		set[name] = value
+		fieldList[i] = intf
 	}
 
-	return set
+	return fieldList
 }
 
 // Add a DictionaryEntry (containing a vendor field) to the dictionary used by Interpret.
