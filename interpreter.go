@@ -126,7 +126,7 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 	case Boolean:
 		return bs[0] != 0
 	case MacAddress, OctetArray:
-		return integers(bs)
+		return bs
 	case String:
 		return string(bs)
 	case Ipv4Address:
@@ -142,13 +142,5 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 			int(bs[12])<<8+int(bs[13]),
 			int(bs[14])<<8+int(bs[15]))
 	}
-	return integers(bs)
-}
-
-func integers(s []byte) []int {
-	r := make([]int, len(s))
-	for i := range s {
-		r[i] = int(s[i])
-	}
-	return r
+	return bs
 }
