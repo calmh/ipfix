@@ -6,6 +6,8 @@ messages. Template management and the standard IPFIX types are
 implemented so a fully parsed data set can be produced. Vendor fields
 can be added at runtime.
 
+Example
+
 To read an IPFIX stream, create a Session around a Reader, then call
 ReadMessage repeatedly.
 
@@ -35,6 +37,10 @@ Interpret, create a DictionaryEntry and call AddDictionaryEntry.
 
 	e := ipfix.DictionaryEntry{Name: "someVendorField", FieldId: 42, EnterpriseId: 123456, Type: ipfix.Int32}
 	s.AddDictionaryEntry(e)
+
+License
+
+The MIT license.
 
 */
 package ipfix
