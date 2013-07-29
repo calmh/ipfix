@@ -3,7 +3,6 @@ package ipfix
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 )
 
 // IPFIX type of an Information Element ("Field").
@@ -130,17 +129,9 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 	case String:
 		return string(bs)
 	case Ipv4Address:
-		return fmt.Sprintf("%d.%d.%d.%d", bs[0], bs[1], bs[2], bs[3])
+		return bs
 	case Ipv6Address:
-		return fmt.Sprintf("%x:%x:%x:%x:%x:%x:%x:%x",
-			int(bs[0])<<8+int(bs[1]),
-			int(bs[2])<<8+int(bs[3]),
-			int(bs[4])<<8+int(bs[5]),
-			int(bs[5])<<8+int(bs[7]),
-			int(bs[6])<<8+int(bs[9]),
-			int(bs[10])<<8+int(bs[11]),
-			int(bs[12])<<8+int(bs[13]),
-			int(bs[14])<<8+int(bs[15]))
+		return bs
 	}
 	return bs
 }
