@@ -176,7 +176,9 @@ func (s *Session) readSet(r *bytes.Buffer) (trecs []TemplateRecord, drecs []Data
 				drecs = append(drecs, *ds)
 			} else {
 				// Data set with unknown template
-				r.Read(make([]byte, int(setHdr.Length)-setHeaderLength))
+				// We can't trust set length, because we might be out of sync.
+				// Consume rest of message.
+				r.Read(make([]byte, r.Len()))
 				return
 			}
 		}
