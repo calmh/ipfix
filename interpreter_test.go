@@ -95,7 +95,8 @@ func TestInterpret(t *testing.T) {
 		t.Error("ReadMessage failed", err)
 	}
 
-	fields := p.Interpret(&msg.DataRecords[0])
+	i := NewInterpreter(p)
+	fields := i.Interpret(&msg.DataRecords[0])
 
 	f0 := InterpretedField{Name: "destinationIPv4Address", FieldId: 12, EnterpriseId: 0, Value: []byte{172, 16, 32, 15}}
 	if fields[0].Name != f0.Name ||

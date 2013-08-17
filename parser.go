@@ -68,10 +68,9 @@ type TemplateFieldSpecifier struct {
 
 // The Session is the context for IPFIX messages.
 type Session struct {
-	templates  [][]TemplateFieldSpecifier
-	reader     io.Reader
-	minRecord  []uint16
-	dictionary fieldDictionary
+	templates [][]TemplateFieldSpecifier
+	reader    io.Reader
+	minRecord []uint16
 }
 
 // NewSession initializes a new Session based on the provided io.Reader.
@@ -80,7 +79,6 @@ func NewSession(reader io.Reader) *Session {
 	s.templates = make([][]TemplateFieldSpecifier, 65536)
 	s.reader = reader
 	s.minRecord = make([]uint16, 65536)
-	s.dictionary = builtinDictionary
 	return &s
 }
 

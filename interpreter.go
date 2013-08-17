@@ -5,6 +5,13 @@ import (
 	"encoding/binary"
 )
 
+// Interpreter provides translation between the raw bytes of a DataRecord
+// and the actual values as specified by the corresponding template.
+type Interpreter struct {
+	dictionary fieldDictionary
+	session    *Session
+}
+
 // IPFIX type of an Information Element ("Field").
 type FieldType string
 
@@ -60,35 +67,39 @@ type InterpretedField struct {
 	RawValue     []byte
 }
 
+// NewInterpreter craets a new Interpreter based on the specified Session.
+func NewInterpreter(s *Session) *Interpreter {
+	return &Interpreter{builtinDictionary, s}
+}
+
 // Interpret a raw DataRecord into a list of InterpretedFields.
-func (s *Session) Interpret(ds *DataRecord) []InterpretedField {
-	tpl := s.templates[ds.TemplateId]
+func (i *Interpreter) Interpret(ds *DataRecord) []InterpretedField {
+	tpl := i.session.templates[ds.TemplateId]
 	if tpl == nil {
 		return nil
 	}
-
 	fieldList := make([]InterpretedField, len(tpl))
 
-	for i, field := range tpl {
+	for j, field := range tpl {
 		intf := InterpretedField{FieldId: field.FieldId, EnterpriseId: field.EnterpriseId}
 
-		entry, ok := s.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]
+		entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]
 		if !ok {
-			intf.RawValue = ds.Fields[i]
+			intf.RawValue = ds.Fields[j]
 		} else {
 			intf.Name = entry.Name
-			intf.Value = interpretBytes(ds.Fields[i], entry.Type)
+			intf.Value = interpretBytes(ds.Fields[j], entry.Type)
 		}
 
-		fieldList[i] = intf
+		fieldList[j] = intf
 	}
 
 	return fieldList
 }
 
 // Add a DictionaryEntry (containing a vendor field) to the dictionary used by Interpret.
-func (s *Session) AddDictionaryEntry(e DictionaryEntry) {
-	s.dictionary[dictionaryKey{e.EnterpriseId, e.FieldId}] = e
+func (i *Interpreter) AddDictionaryEntry(e DictionaryEntry) {
+	i.dictionary[dictionaryKey{e.EnterpriseId, e.FieldId}] = e
 }
 
 func interpretBytes(bs []byte, t FieldType) interface{} {

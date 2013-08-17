@@ -142,6 +142,38 @@ type of the field is unknown at the time of interpretation), Name will be the
 empty string, Value will be a nil interface and RawValue will contain the
 original bytes.
 
+#### type Interpreter
+
+```go
+type Interpreter struct {
+}
+```
+
+Interpreter provides translation between the raw bytes of a DataRecord and the
+actual values as specified by the corresponding template.
+
+#### func  NewInterpreter
+
+```go
+func NewInterpreter(s *Session) *Interpreter
+```
+NewInterpreter craets a new Interpreter based on the specified Session.
+
+#### func (*Interpreter) AddDictionaryEntry
+
+```go
+func (i *Interpreter) AddDictionaryEntry(e DictionaryEntry)
+```
+Add a DictionaryEntry (containing a vendor field) to the dictionary used by
+Interpret.
+
+#### func (*Interpreter) Interpret
+
+```go
+func (i *Interpreter) Interpret(ds *DataRecord) []InterpretedField
+```
+Interpret a raw DataRecord into a list of InterpretedFields.
+
 #### type Message
 
 ```go
@@ -186,21 +218,6 @@ The Session is the context for IPFIX messages.
 func NewSession(reader io.Reader) *Session
 ```
 NewSession initializes a new Session based on the provided io.Reader.
-
-#### func (*Session) AddDictionaryEntry
-
-```go
-func (s *Session) AddDictionaryEntry(e DictionaryEntry)
-```
-Add a DictionaryEntry (containing a vendor field) to the dictionary used by
-Interpret.
-
-#### func (*Session) Interpret
-
-```go
-func (s *Session) Interpret(ds *DataRecord) []InterpretedField
-```
-Interpret a raw DataRecord into a list of InterpretedFields.
 
 #### func (*Session) ReadMessage
 
