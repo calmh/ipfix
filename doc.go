@@ -14,6 +14,7 @@ To read an IPFIX stream, create a Session around a Reader, then call
 ReadMessage repeatedly.
 
 	s := ipfix.NewSession(os.Stdin)
+	i := ipfix.NewInterpreter(s)
 
 	for {
 		// ReadMessage will block until a full message is available.
@@ -26,7 +27,7 @@ ReadMessage repeatedly.
 			// record contains raw enterpriseId, fieldId => []byte information
 			fmt.Println(record)
 
-			fieldsMap := s.Interpret(&record)
+			fieldsMap := i.Interpret(&record)
 			// fieldsMap is a map[string]interface{}, with types
 			// resolved to their natural equivalents and field
 			// names resolved for standard fields.
