@@ -1,6 +1,8 @@
 /*
 Package ipfix implements an IPFIX (RFC 5101) parser and interpreter.
 
+[![Build Status](https://drone.io/github.com/calmh/ipfix/status.png)](https://drone.io/github.com/calmh/ipfix/latest)
+
 An input stream in the form of an io.Reader is read and chunked into
 messages. Template management and the standard IPFIX types are
 implemented so a fully parsed data set can be produced. Vendor fields
