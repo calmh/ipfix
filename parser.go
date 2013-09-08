@@ -114,8 +114,10 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 	}
 	msg.Header = msgHdr
 
-	msgSlice := make([]byte, int(msgHdr.Length)-msgHeaderLength)
-	io.ReadFull(s.reader, msgSlice)
+	msgLen := int(msgHdr.Length) - msgHeaderLength
+	msgSlice := make([]byte, msgLen)
+	_, err = io.ReadFull(s.reader, msgSlice)
+	errorIf(err)
 	r := bytes.NewBuffer(msgSlice)
 
 	for r.Len() > 0 {
@@ -133,10 +135,11 @@ func (s *Session) readSet(r *bytes.Buffer) (trecs []TemplateRecord, drecs []Data
 
 	setHdr := setHeader{}
 	err := binary.Read(r, binary.BigEndian, &setHdr)
+	setEnd := r.Len() - int(setHdr.Length) + setHeaderLength
 	errorIf(err)
 
-	for r.Len() > 0 {
-		if r.Len() < int(s.minRecord[setHdr.SetId]) {
+	for r.Len() > setEnd {
+		if r.Len()-setEnd < int(s.minRecord[setHdr.SetId]) {
 			// Padding
 			return
 		} else if setHdr.SetId == 2 {
