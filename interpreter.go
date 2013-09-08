@@ -117,7 +117,7 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 		var s int16
 		binary.Read(bytes.NewBuffer(bs), binary.BigEndian, &s)
 		return s
-	case Int32:
+	case Int32, DateTimeSeconds:
 		var s int32
 		binary.Read(bytes.NewBuffer(bs), binary.BigEndian, &s)
 		return s
