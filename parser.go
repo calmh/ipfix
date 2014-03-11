@@ -5,8 +5,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"log"
+	"os"
 	"runtime"
 )
+
+var debug = os.Getenv("IPFIXDEBUG") != ""
 
 // The version field in IPFIX messages should always have the value 10. If it
 // does not, you get this error. It's probably a sign of a bug in the parser or
@@ -109,6 +113,9 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 	msgHdr := MessageHeader{}
 	err = binary.Read(s.reader, binary.BigEndian, &msgHdr)
 	errorIf(err)
+	if debug {
+		log.Printf("read pktheader: %#v", msgHdr)
+	}
 	if msgHdr.Version != 10 {
 		errorIf(ErrVersion)
 	}
@@ -135,6 +142,9 @@ func (s *Session) readSet(r *bytes.Buffer) (trecs []TemplateRecord, drecs []Data
 
 	setHdr := setHeader{}
 	err := binary.Read(r, binary.BigEndian, &setHdr)
+	if debug {
+		log.Printf("read setheader: %#v", setHdr)
+	}
 	setEnd := r.Len() - int(setHdr.Length) + setHeaderLength
 	errorIf(err)
 
@@ -143,9 +153,20 @@ func (s *Session) readSet(r *bytes.Buffer) (trecs []TemplateRecord, drecs []Data
 			// Padding
 			return
 		} else if setHdr.SetId == 2 {
+			if debug {
+				log.Println("got template set")
+			}
+
 			// Template Set
 			ts := s.readTemplateRecord(r)
 			trecs = append(trecs, *ts)
+
+			if debug {
+				log.Println("template for set", ts.TemplateId)
+				for _, t := range ts.FieldSpecifiers {
+					log.Printf("    %v", t)
+				}
+			}
 
 			// Update the template cache
 			tid := ts.TemplateId
@@ -167,15 +188,26 @@ func (s *Session) readSet(r *bytes.Buffer) (trecs []TemplateRecord, drecs []Data
 			}
 			s.minRecord[tid] = minLength
 		} else if setHdr.SetId == 3 {
+			if debug {
+				log.Println("got options template set, unhandled")
+			}
+
 			// Options Template Set, not handled
 			r.Read(make([]byte, int(setHdr.Length)-setHeaderLength))
 		} else {
+			if debug {
+				log.Println("got data set for template", setHdr.SetId)
+			}
+
 			if tpl := s.templates[setHdr.SetId]; tpl != nil {
 				// Data set
 				ds := s.readDataRecord(r, tpl)
 				ds.TemplateId = setHdr.SetId
 				drecs = append(drecs, *ds)
 			} else {
+				if debug {
+					log.Println("set", setHdr.SetId, "is unknown")
+				}
 				// Data set with unknown template
 				// We can't trust set length, because we might be out of sync.
 				// Consume rest of message.
