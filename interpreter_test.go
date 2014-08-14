@@ -3,6 +3,8 @@ package ipfix
 import (
 	"bytes"
 	"encoding/hex"
+	"net"
+	"reflect"
 	"testing"
 )
 
@@ -98,15 +100,8 @@ func TestInterpret(t *testing.T) {
 	i := NewInterpreter(p)
 	fields := i.Interpret(&msg.DataRecords[0])
 
-	f0 := InterpretedField{Name: "destinationIPv4Address", FieldId: 12, EnterpriseId: 0, Value: []byte{172, 16, 32, 15}}
-	if fields[0].Name != f0.Name ||
-		fields[0].FieldId != f0.FieldId ||
-		fields[0].EnterpriseId != f0.EnterpriseId ||
-		fields[0].Value.([]byte)[0] != f0.Value.([]byte)[0] ||
-		fields[0].Value.([]byte)[1] != f0.Value.([]byte)[1] ||
-		fields[0].Value.([]byte)[2] != f0.Value.([]byte)[2] ||
-		fields[0].Value.([]byte)[3] != f0.Value.([]byte)[3] ||
-		len(fields[0].RawValue) != 0 {
+	f0 := InterpretedField{Name: "destinationIPv4Address", FieldId: 12, EnterpriseId: 0, Value: net.IP{172, 16, 32, 15}}
+	if !reflect.DeepEqual(fields[0], f0) {
 		t.Error(fields[0], "!=", f0)
 	}
 

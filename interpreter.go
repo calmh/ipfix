@@ -3,6 +3,7 @@ package ipfix
 import (
 	"bytes"
 	"encoding/binary"
+	"net"
 )
 
 // Interpreter provides translation between the raw bytes of a DataRecord
@@ -140,9 +141,9 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 	case String:
 		return string(bs)
 	case Ipv4Address:
-		return bs
+		return net.IP(bs)
 	case Ipv6Address:
-		return bs
+		return net.IP(bs)
 	}
 	return bs
 }
