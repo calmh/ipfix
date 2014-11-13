@@ -98,6 +98,31 @@ func (i *Interpreter) Interpret(ds *DataRecord) []InterpretedField {
 	return fieldList
 }
 
+// Interpret a raw DataRecord into a map of InterpretedFields.
+func (i *Interpreter) InterpretMap(ds *DataRecord) map[string]InterpretedField {
+	tpl := i.session.templates[ds.TemplateId]
+	if tpl == nil {
+		return nil
+	}
+	fieldMap := make(map[string]InterpretedField, len(tpl))
+
+	for j, field := range tpl {
+		intf := InterpretedField{FieldId: field.FieldId, EnterpriseId: field.EnterpriseId}
+
+		entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]
+		if !ok {
+			intf.RawValue = ds.Fields[j]
+		} else {
+			intf.Name = entry.Name
+			intf.Value = interpretBytes(ds.Fields[j], entry.Type)
+		}
+
+		fieldMap[intf.Name] = intf
+	}
+
+	return fieldMap
+}
+
 // Add a DictionaryEntry (containing a vendor field) to the dictionary used by Interpret.
 func (i *Interpreter) AddDictionaryEntry(e DictionaryEntry) {
 	i.dictionary[dictionaryKey{e.EnterpriseId, e.FieldId}] = e
