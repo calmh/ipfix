@@ -173,18 +173,16 @@ func BenchmarkParseInterpret(b *testing.B) {
 	}
 
 	var msg *ipfix.Message
-	var l int
 	for j := 0; j < b.N; j++ {
 		pb.Write(p1)
 		msg, err = p.ReadMessage()
 		if err != nil {
 			b.Error("ReadMessage failed", err)
 		}
-		l = len(msg.DataRecords)
 		for k := range msg.DataRecords {
 			i.Interpret(&msg.DataRecords[k])
 		}
 	}
 
-	b.SetBytes(int64(l))
+	b.SetBytes(int64(len(p1)))
 }
