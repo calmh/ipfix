@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"os"
 	"runtime"
 )
@@ -106,12 +107,59 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 		}
 	}()
 
+	if pc, ok := s.reader.(net.PacketConn); ok {
+		return s.readFromPacketConn(pc)
+	} else {
+		return s.readFromStream(s.reader)
+	}
+}
+
+func (s *Session) readFromPacketConn(pc net.PacketConn) (msg *Message, err error) {
+	if debug {
+		log.Println("read from net.PacketConn")
+	}
+
+	buf := make([]byte, 65536)
+	n, _, err := pc.ReadFrom(buf)
+	if err != nil {
+		return nil, err
+	}
+	r := bytes.NewBuffer(buf[:n])
+
+	msg = &Message{}
+	msgHdr := MessageHeader{}
+
+	err = binary.Read(r, binary.BigEndian, &msgHdr)
+	errorIf(err)
+	if debug {
+		log.Printf("read pktheader: %#v", msgHdr)
+	}
+	if msgHdr.Version != 10 {
+		errorIf(ErrVersion)
+	}
+	msg.Header = msgHdr
+	errorIf(err)
+
+	for r.Len() > 0 {
+		trecs, drecs := s.readSet(r)
+		msg.TemplateRecords = append(msg.TemplateRecords, trecs...)
+		msg.DataRecords = append(msg.DataRecords, drecs...)
+	}
+
+	return
+}
+
+func (s *Session) readFromStream(sr io.Reader) (msg *Message, err error) {
+	if debug {
+		log.Println("read from io.Reader")
+	}
+
 	msg = &Message{}
 	msg.DataRecords = make([]DataRecord, 0)
 	msg.TemplateRecords = make([]TemplateRecord, 0)
 
 	msgHdr := MessageHeader{}
-	err = binary.Read(s.reader, binary.BigEndian, &msgHdr)
+	err = binary.Read(sr, binary.BigEndian, &msgHdr)
 	errorIf(err)
 	if debug {
 		log.Printf("read pktheader: %#v", msgHdr)
@@ -123,7 +171,7 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 
 	msgLen := int(msgHdr.Length) - msgHeaderLength
 	msgSlice := make([]byte, msgLen)
-	_, err = io.ReadFull(s.reader, msgSlice)
+	_, err = io.ReadFull(sr, msgSlice)
 	errorIf(err)
 	r := bytes.NewBuffer(msgSlice)
 
