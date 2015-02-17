@@ -1,8 +1,8 @@
 package ipfix
 
 import (
-	"bytes"
 	"encoding/binary"
+	"math"
 	"net"
 )
 
@@ -14,31 +14,54 @@ type Interpreter struct {
 }
 
 // IPFIX type of an Information Element ("Field").
-type FieldType string
+type FieldType int
 
 // The available field types as defined by RFC 5102.
 const (
-	Uint8                FieldType = "unsigned8"
-	Uint16               FieldType = "unsigned16"
-	Uint32               FieldType = "unsigned32"
-	Uint64               FieldType = "unsigned64"
-	Int8                 FieldType = "signed8"
-	Int16                FieldType = "signed16"
-	Int32                FieldType = "signed32"
-	Int64                FieldType = "signed64"
-	Float32              FieldType = "float32"
-	Float64              FieldType = "float64"
-	Boolean              FieldType = "boolean"
-	MacAddress           FieldType = "macAddress"
-	OctetArray           FieldType = "octetArray"
-	String               FieldType = "string"
-	DateTimeSeconds      FieldType = "dateTimeSeconds"
-	DateTimeMilliseconds FieldType = "dateTimeMilliseconds"
-	DateTimeMicroseconds FieldType = "dateTimeMicroseconds"
-	DateTimeNanoseconds  FieldType = "dateTimeNanoseconds"
-	Ipv4Address          FieldType = "ipv4Address"
-	Ipv6Address          FieldType = "ipv6Address"
+	Uint8 FieldType = iota
+	Uint16
+	Uint32
+	Uint64
+	Int8
+	Int16
+	Int32
+	Int64
+	Float32
+	Float64
+	Boolean
+	MacAddress
+	OctetArray
+	String
+	DateTimeSeconds
+	DateTimeMilliseconds
+	DateTimeMicroseconds
+	DateTimeNanoseconds
+	Ipv4Address
+	Ipv6Address
 )
+
+var FieldTypes = map[string]FieldType{
+	"unsigned8":            Uint8,
+	"unsigned16":           Uint16,
+	"unsigned32":           Uint32,
+	"unsigned64":           Uint64,
+	"signed8":              Int8,
+	"signed16":             Int16,
+	"signed32":             Int32,
+	"signed64":             Int64,
+	"float32":              Float32,
+	"float64":              Float64,
+	"boolean":              Boolean,
+	"macAddress":           MacAddress,
+	"octetArray":           OctetArray,
+	"string":               String,
+	"dateTimeSeconds":      DateTimeSeconds,
+	"dateTimeMilliseconds": DateTimeMilliseconds,
+	"dateTimeMicroseconds": DateTimeMicroseconds,
+	"dateTimeNanoseconds":  DateTimeNanoseconds,
+	"ipv4Address":          Ipv4Address,
+	"ipv6Address":          Ipv6Address,
+}
 
 // DictionaryEntry provied a mapping between an (Enterprise, Field) pair and a Name and Type.
 type DictionaryEntry struct {
@@ -130,44 +153,33 @@ func (i *Interpreter) AddDictionaryEntry(e DictionaryEntry) {
 
 func interpretBytes(bs []byte, t FieldType) interface{} {
 	switch t {
-	case Uint8, Uint16, Uint32, Uint64:
-		var s uint64
-		for _, b := range bs {
-			s = s << 8
-			s += uint64(b)
-		}
-		return s
+	case Uint8:
+		return bs[0]
+	case Uint16:
+		return binary.BigEndian.Uint16(bs)
+	case Uint32, DateTimeSeconds:
+		return binary.BigEndian.Uint32(bs)
+	case Uint64:
+		return binary.BigEndian.Uint64(bs)
 	case Int8:
 		return int8(bs[0])
 	case Int16:
-		var s int16
-		binary.Read(bytes.NewBuffer(bs), binary.BigEndian, &s)
-		return s
-	case Int32, DateTimeSeconds:
-		var s int32
-		binary.Read(bytes.NewBuffer(bs), binary.BigEndian, &s)
-		return s
+		return int16(binary.BigEndian.Uint16(bs))
+	case Int32:
+		return int32(binary.BigEndian.Uint32(bs))
 	case Int64:
-		var s int64
-		binary.Read(bytes.NewBuffer(bs), binary.BigEndian, &s)
-		return s
+		return int64(binary.BigEndian.Uint64(bs))
 	case Float32:
-		var s float32
-		binary.Read(bytes.NewBuffer(bs), binary.BigEndian, &s)
-		return s
+		return math.Float32frombits(binary.BigEndian.Uint32(bs))
 	case Float64:
-		var s float64
-		binary.Read(bytes.NewBuffer(bs), binary.BigEndian, &s)
-		return s
+		return math.Float64frombits(binary.BigEndian.Uint64(bs))
 	case Boolean:
 		return bs[0] != 0
 	case MacAddress, OctetArray:
 		return bs
 	case String:
 		return string(bs)
-	case Ipv4Address:
-		return net.IP(bs)
-	case Ipv6Address:
+	case Ipv4Address, Ipv6Address:
 		return net.IP(bs)
 	}
 	return bs

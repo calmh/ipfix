@@ -17,19 +17,19 @@ func TestInterpretUint(t *testing.T) {
 
 	bs = []byte{0xf7, 2, 3, 4}
 	v = interpretBytes(bs, Uint32)
-	if v != uint64(0xf7020304) {
+	if v != uint32(0xf7020304) {
 		t.Errorf("%d != %d", v, 0x01020304)
 	}
 
 	bs = []byte{0xf7, 4}
 	v = interpretBytes(bs, Uint16)
-	if v != uint64(0xf704) {
+	if v != uint16(0xf704) {
 		t.Errorf("%d != %d", v, 0x0104)
 	}
 
 	bs = []byte{0xf7}
 	v = interpretBytes(bs, Uint8)
-	if v != uint64(0xf7) {
+	if v != uint8(0xf7) {
 		t.Errorf("%d != %d", v, 0xf7)
 	}
 }
