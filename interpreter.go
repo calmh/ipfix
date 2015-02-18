@@ -105,17 +105,43 @@ func (i *Interpreter) Interpret(ds *DataRecord) []InterpretedField {
 	fieldList := make([]InterpretedField, len(tpl))
 
 	for j, field := range tpl {
-		intf := InterpretedField{FieldId: field.FieldId, EnterpriseId: field.EnterpriseId}
+		fieldList[j].FieldId = field.FieldId
+		fieldList[j].EnterpriseId = field.EnterpriseId
 
-		entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]
-		if !ok {
-			intf.RawValue = ds.Fields[j]
+		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
+			fieldList[j].Name = entry.Name
+			fieldList[j].Value = interpretBytes(ds.Fields[j], entry.Type)
 		} else {
-			intf.Name = entry.Name
-			intf.Value = interpretBytes(ds.Fields[j], entry.Type)
+			fieldList[j].RawValue = ds.Fields[j]
 		}
+	}
 
-		fieldList[j] = intf
+	return fieldList
+}
+
+// Interpret a raw DataRecord into a list of InterpretedFields. Uses the given
+// fieldList if it is long enough to fit the record.
+func (i *Interpreter) InterpretInto(ds *DataRecord, fieldList []InterpretedField) []InterpretedField {
+	tpl := i.session.templates[ds.TemplateId]
+	if tpl == nil {
+		return nil
+	}
+	if len(fieldList) < len(tpl) {
+		fieldList = make([]InterpretedField, len(tpl))
+	} else {
+		fieldList = fieldList[:len(tpl)]
+	}
+
+	for j, field := range tpl {
+		fieldList[j].FieldId = field.FieldId
+		fieldList[j].EnterpriseId = field.EnterpriseId
+
+		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
+			fieldList[j].Name = entry.Name
+			fieldList[j].Value = interpretBytes(ds.Fields[j], entry.Type)
+		} else {
+			fieldList[j].RawValue = ds.Fields[j]
+		}
 	}
 
 	return fieldList
@@ -132,12 +158,11 @@ func (i *Interpreter) InterpretMap(ds *DataRecord) map[string]InterpretedField {
 	for j, field := range tpl {
 		intf := InterpretedField{FieldId: field.FieldId, EnterpriseId: field.EnterpriseId}
 
-		entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]
-		if !ok {
-			intf.RawValue = ds.Fields[j]
-		} else {
+		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
 			intf.Name = entry.Name
 			intf.Value = interpretBytes(ds.Fields[j], entry.Type)
+		} else {
+			intf.RawValue = ds.Fields[j]
 		}
 
 		fieldMap[intf.Name] = intf
