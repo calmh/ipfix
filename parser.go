@@ -139,17 +139,15 @@ func (s *Session) readFromPacketConn(pc readerFrom) (msg *Message, err error) {
 	r := bytes.NewBuffer(buf[:n])
 
 	msg = &Message{}
-	msgHdr := MessageHeader{}
 
-	err = binary.Read(r, binary.BigEndian, &msgHdr)
+	err = binary.Read(r, binary.BigEndian, &msg.Header)
 	errorIf(err)
 	if debug {
-		log.Printf("read pktheader: %#v", msgHdr)
+		log.Printf("read pktheader: %#v", msg.Header)
 	}
-	if msgHdr.Version != 10 {
+	if msg.Header.Version != 10 {
 		errorIf(ErrVersion)
 	}
-	msg.Header = msgHdr
 	errorIf(err)
 
 	for r.Len() > 0 {
@@ -171,19 +169,20 @@ func (s *Session) readFromStream(sr io.Reader) (msg *Message, err error) {
 	msg.DataRecords = make([]DataRecord, 0)
 	msg.TemplateRecords = make([]TemplateRecord, 0)
 
-	msgHdr := MessageHeader{}
-	err = binary.Read(sr, binary.BigEndian, &msgHdr)
+	err = binary.Read(sr, binary.BigEndian, &msg.Header)
 	errorIf(err)
 	if debug {
-		log.Printf("read pktheader: %#v", msgHdr)
+		log.Printf("read pktheader: %#v", msg.Header)
 	}
-	if msgHdr.Version != 10 {
+	if msg.Header.Version != 10 {
 		errorIf(ErrVersion)
 	}
-	msg.Header = msgHdr
 
-	msgLen := int(msgHdr.Length) - msgHeaderLength
-	msgSlice := make([]byte, msgLen)
+	msgLen := int(msg.Header.Length) - msgHeaderLength
+	if msgLen > 65535 {
+		panic("unexpectedly long message, need to unoptimize")
+	}
+	msgSlice := s.buffers.Get().([]byte)[:msgLen]
 	_, err = io.ReadFull(sr, msgSlice)
 	errorIf(err)
 	r := bytes.NewBuffer(msgSlice)
@@ -193,6 +192,8 @@ func (s *Session) readFromStream(sr io.Reader) (msg *Message, err error) {
 		msg.TemplateRecords = append(msg.TemplateRecords, trecs...)
 		msg.DataRecords = append(msg.DataRecords, drecs...)
 	}
+
+	s.buffers.Put(msgSlice[:cap(msgSlice)])
 
 	return
 }
