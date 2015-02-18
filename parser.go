@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"sync"
 )
 
 var debug = os.Getenv("IPFIXDEBUG") != ""
@@ -76,6 +77,7 @@ type Session struct {
 	templates [][]TemplateFieldSpecifier
 	reader    io.Reader
 	minRecord []uint16
+	buffers   *sync.Pool
 }
 
 // NewSession initializes a new Session based on the provided io.Reader.
@@ -84,12 +86,22 @@ func NewSession(reader io.Reader) *Session {
 	s.templates = make([][]TemplateFieldSpecifier, 65536)
 	s.reader = reader
 	s.minRecord = make([]uint16, 65536)
+	s.buffers = &sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 65536)
+		},
+	}
 	return &s
 }
 
 var msgHeaderLength = binary.Size(MessageHeader{})
 var setHeaderLength = binary.Size(setHeader{})
 var templateHeaderLength = binary.Size(templateHeader{})
+
+// readerFrom is the relevant part of a net.PacketConn
+type readerFrom interface {
+	ReadFrom([]byte) (int, net.Addr, error)
+}
 
 // ReadMessage extracts and returns one message from the IPFIX stream. As long
 // as err is nil, further messages can be read from the stream. Errors are not
@@ -107,19 +119,19 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 		}
 	}()
 
-	if pc, ok := s.reader.(net.PacketConn); ok {
+	if pc, ok := s.reader.(readerFrom); ok {
 		return s.readFromPacketConn(pc)
 	} else {
 		return s.readFromStream(s.reader)
 	}
 }
 
-func (s *Session) readFromPacketConn(pc net.PacketConn) (msg *Message, err error) {
+func (s *Session) readFromPacketConn(pc readerFrom) (msg *Message, err error) {
 	if debug {
 		log.Println("read from net.PacketConn")
 	}
 
-	buf := make([]byte, 65536)
+	buf := s.buffers.Get().([]byte)
 	n, _, err := pc.ReadFrom(buf)
 	if err != nil {
 		return nil, err
@@ -146,6 +158,7 @@ func (s *Session) readFromPacketConn(pc net.PacketConn) (msg *Message, err error
 		msg.DataRecords = append(msg.DataRecords, drecs...)
 	}
 
+	s.buffers.Put(buf)
 	return
 }
 
