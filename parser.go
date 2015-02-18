@@ -1,7 +1,6 @@
 package ipfix
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -38,6 +37,14 @@ type MessageHeader struct {
 	ExportTime     uint32 // Epoch seconds
 	SequenceNumber uint32
 	DomainId       uint32
+}
+
+func (h *MessageHeader) Unmarshal(bs []byte) {
+	h.Version = binary.BigEndian.Uint16(bs[0:])
+	h.Length = binary.BigEndian.Uint16(bs[2:])
+	h.ExportTime = binary.BigEndian.Uint32(bs[2+2:])
+	h.SequenceNumber = binary.BigEndian.Uint32(bs[2+2+4:])
+	h.DomainId = binary.BigEndian.Uint32(bs[2+2+4+4:])
 }
 
 type setHeader struct {
@@ -107,14 +114,13 @@ type readerFrom interface {
 // as err is nil, further messages can be read from the stream. Errors are not
 // recoverable -- once an error has been returned, ReadMessage should not be
 // called again on the same session.
-func (s *Session) ReadMessage() (msg *Message, err error) {
+func (s *Session) ReadMessage() (msg Message, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(runtime.Error); ok {
 				panic(r)
 			}
 
-			msg = nil
 			err = r.(error)
 		}
 	}()
@@ -126,7 +132,7 @@ func (s *Session) ReadMessage() (msg *Message, err error) {
 	}
 }
 
-func (s *Session) readFromPacketConn(pc readerFrom) (msg *Message, err error) {
+func (s *Session) readFromPacketConn(pc readerFrom) (Message, error) {
 	if debug {
 		log.Println("read from net.PacketConn")
 	}
@@ -134,94 +140,101 @@ func (s *Session) readFromPacketConn(pc readerFrom) (msg *Message, err error) {
 	buf := s.buffers.Get().([]byte)
 	n, _, err := pc.ReadFrom(buf)
 	if err != nil {
-		return nil, err
+		return Message{}, err
 	}
-	r := bytes.NewBuffer(buf[:n])
+	bs := buf[:n]
 
-	msg = &Message{}
-
-	err = binary.Read(r, binary.BigEndian, &msg.Header)
-	errorIf(err)
+	var msg Message
+	msg.Header.Unmarshal(bs)
+	bs = bs[msgHeaderLength:]
 	if debug {
 		log.Printf("read pktheader: %#v", msg.Header)
 	}
 	if msg.Header.Version != 10 {
-		errorIf(ErrVersion)
+		return Message{}, ErrVersion
 	}
-	errorIf(err)
 
-	for r.Len() > 0 {
-		trecs, drecs := s.readSet(r)
-		msg.TemplateRecords = append(msg.TemplateRecords, trecs...)
-		msg.DataRecords = append(msg.DataRecords, drecs...)
-	}
+	msg.TemplateRecords, msg.DataRecords = s.readBuffer(bs)
 
 	s.buffers.Put(buf)
-	return
+	return msg, nil
 }
 
-func (s *Session) readFromStream(sr io.Reader) (msg *Message, err error) {
+func (s *Session) readFromStream(sr io.Reader) (Message, error) {
 	if debug {
 		log.Println("read from io.Reader")
 	}
 
-	msg = &Message{}
-	msg.DataRecords = make([]DataRecord, 0)
-	msg.TemplateRecords = make([]TemplateRecord, 0)
+	buf := s.buffers.Get().([]byte)
+	_, err := io.ReadFull(sr, buf[:msgHeaderLength])
+	if err != nil {
+		panic(err)
+	}
 
-	err = binary.Read(sr, binary.BigEndian, &msg.Header)
-	errorIf(err)
+	var msg Message
+	msg.Header.Unmarshal(buf)
+
 	if debug {
 		log.Printf("read pktheader: %#v", msg.Header)
 	}
 	if msg.Header.Version != 10 {
-		errorIf(ErrVersion)
+		return Message{}, ErrVersion
 	}
 
 	msgLen := int(msg.Header.Length) - msgHeaderLength
 	if msgLen > 65535 {
 		panic("unexpectedly long message, need to unoptimize")
 	}
-	msgSlice := s.buffers.Get().([]byte)[:msgLen]
+	msgSlice := buf[:msgLen]
 	_, err = io.ReadFull(sr, msgSlice)
-	errorIf(err)
-	r := bytes.NewBuffer(msgSlice)
-
-	for r.Len() > 0 {
-		trecs, drecs := s.readSet(r)
-		msg.TemplateRecords = append(msg.TemplateRecords, trecs...)
-		msg.DataRecords = append(msg.DataRecords, drecs...)
+	if err != nil {
+		return Message{}, err
 	}
 
-	s.buffers.Put(msgSlice[:cap(msgSlice)])
+	msg.TemplateRecords, msg.DataRecords = s.readBuffer(msgSlice)
 
-	return
+	s.buffers.Put(buf)
+
+	return msg, nil
 }
 
-func (s *Session) readSet(r *bytes.Buffer) (trecs []TemplateRecord, drecs []DataRecord) {
-	trecs = make([]TemplateRecord, 0)
-	drecs = make([]DataRecord, 0)
+func (s *Session) readBuffer(bs []byte) ([]TemplateRecord, []DataRecord) {
+	var ts, trecs []TemplateRecord
+	var ds, drecs []DataRecord
+	for len(bs) > 0 {
+		ts, ds, bs = s.readSet(bs)
+		trecs = append(trecs, ts...)
+		drecs = append(drecs, ds...)
+	}
+	return trecs, drecs
+}
+
+func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte) {
+	var trecs []TemplateRecord
+	var drecs []DataRecord
 
 	setHdr := setHeader{}
-	err := binary.Read(r, binary.BigEndian, &setHdr)
+	setHdr.SetId, bs = binary.BigEndian.Uint16(bs), bs[2:]
+	setHdr.Length, bs = binary.BigEndian.Uint16(bs), bs[2:]
 	if debug {
 		log.Printf("read setheader: %#v", setHdr)
+		log.Println(setHdr.Length, len(bs))
 	}
-	setEnd := r.Len() - int(setHdr.Length) + setHeaderLength
-	errorIf(err)
+	rest := bs[int(setHdr.Length)-setHeaderLength:]
 
-	for r.Len() > setEnd {
-		if r.Len()-setEnd < int(s.minRecord[setHdr.SetId]) {
+	for len(bs) > 0 {
+		if len(bs) < int(s.minRecord[setHdr.SetId]) {
 			// Padding
-			return
+			return trecs, drecs, rest
 		} else if setHdr.SetId == 2 {
 			if debug {
 				log.Println("got template set")
 			}
 
 			// Template Set
-			ts := s.readTemplateRecord(r)
-			trecs = append(trecs, *ts)
+			var ts TemplateRecord
+			ts, bs = s.readTemplateRecord(bs)
+			trecs = append(trecs, ts)
 
 			if debug {
 				log.Println("template for set", ts.TemplateId)
@@ -255,7 +268,7 @@ func (s *Session) readSet(r *bytes.Buffer) (trecs []TemplateRecord, drecs []Data
 			}
 
 			// Options Template Set, not handled
-			r.Read(make([]byte, int(setHdr.Length)-setHeaderLength))
+			bs = bs[len(bs):]
 		} else {
 			if debug {
 				log.Println("got data set for template", setHdr.SetId)
@@ -263,9 +276,10 @@ func (s *Session) readSet(r *bytes.Buffer) (trecs []TemplateRecord, drecs []Data
 
 			if tpl := s.templates[setHdr.SetId]; tpl != nil {
 				// Data set
-				ds := s.readDataRecord(r, tpl)
+				var ds DataRecord
+				ds, bs = s.readDataRecord(bs, tpl)
 				ds.TemplateId = setHdr.SetId
-				drecs = append(drecs, *ds)
+				drecs = append(drecs, ds)
 			} else {
 				if debug {
 					log.Println("set", setHdr.SetId, "is unknown")
@@ -273,88 +287,71 @@ func (s *Session) readSet(r *bytes.Buffer) (trecs []TemplateRecord, drecs []Data
 				// Data set with unknown template
 				// We can't trust set length, because we might be out of sync.
 				// Consume rest of message.
-				r.Read(make([]byte, r.Len()))
-				return
+				return nil, nil, nil
 			}
 		}
 	}
 
-	return
+	return trecs, drecs, rest
 }
 
-func (s *Session) readDataRecord(r *bytes.Buffer, tpl []TemplateFieldSpecifier) *DataRecord {
+func (s *Session) readDataRecord(bs []byte, tpl []TemplateFieldSpecifier) (DataRecord, []byte) {
 	ds := DataRecord{}
 	ds.Fields = make([][]byte, len(tpl))
 
 	for i := range tpl {
-		var bs []byte
+		var val []byte
 		if tpl[i].Length == 65535 {
-			bs = s.readVariableLength(r)
+			val, bs = s.readVariableLength(bs)
 		} else {
-			bs = s.readFixedLength(r, int(tpl[i].Length))
+			val, bs = s.readFixedLength(bs, int(tpl[i].Length))
 		}
-		ds.Fields[i] = bs
+		ds.Fields[i] = val
 	}
 
-	return &ds
+	return ds, bs
 }
 
-func (s *Session) readTemplateRecord(r *bytes.Buffer) *TemplateRecord {
+func (s *Session) readTemplateRecord(bs []byte) (TemplateRecord, []byte) {
 	ts := TemplateRecord{}
 	th := templateHeader{}
-	err := binary.Read(r, binary.BigEndian, &th)
-	errorIf(err)
+	th.TemplateId, bs = binary.BigEndian.Uint16(bs), bs[2:]
+	th.FieldCount, bs = binary.BigEndian.Uint16(bs), bs[2:]
 
 	ts.TemplateId = th.TemplateId
 	ts.FieldSpecifiers = make([]TemplateFieldSpecifier, th.FieldCount)
 	for i := 0; i < int(th.FieldCount); i++ {
 		f := TemplateFieldSpecifier{}
-		err = binary.Read(r, binary.BigEndian, &f.FieldId)
-		errorIf(err)
-		err = binary.Read(r, binary.BigEndian, &f.Length)
-		errorIf(err)
+		f.FieldId, bs = binary.BigEndian.Uint16(bs), bs[2:]
+		f.Length, bs = binary.BigEndian.Uint16(bs), bs[2:]
 		if f.FieldId >= 0x8000 {
 			f.FieldId -= 0x8000
-			err = binary.Read(r, binary.BigEndian, &f.EnterpriseId)
-			errorIf(err)
+			f.EnterpriseId, bs = binary.BigEndian.Uint32(bs), bs[4:]
 		}
 		ts.FieldSpecifiers[i] = f
 	}
 
-	return &ts
+	return ts, bs
 }
 
-func (s *Session) readFixedLength(r *bytes.Buffer, n int) []byte {
-	bs := make([]byte, n)
-	n1, err := r.Read(bs)
-	errorIf(err)
-	if n1 != n {
-		panic(ErrRead)
-	}
-	return bs
-}
-
-func (s *Session) readVariableLength(r *bytes.Buffer) []byte {
+func (s *Session) readVariableLength(bs []byte) (val, rest []byte) {
 	var l int
 
-	var l0 uint8
-	err := binary.Read(r, binary.BigEndian, &l0)
-	errorIf(err)
-
+	l0, bs := bs[0], bs[1:]
 	if l0 < 255 {
 		l = int(l0)
 	} else {
-		var l1 uint16
-		err := binary.Read(r, binary.BigEndian, &l1)
-		errorIf(err)
-		l = int(l1)
+		l, bs = int(binary.BigEndian.Uint16(bs)), bs[2:]
 	}
 
-	return s.readFixedLength(r, l)
+	return s.readFixedLength(bs, l)
 }
 
-func errorIf(err error) {
-	if err != nil {
-		panic(err)
+func (s *Session) readFixedLength(bs []byte, l int) (val, rest []byte) {
+	if l > len(bs) {
+		panic(ErrRead)
 	}
+	val = make([]byte, l)
+	copy(val, bs)
+	return val, bs[l:]
 }

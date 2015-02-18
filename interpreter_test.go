@@ -93,7 +93,7 @@ func TestInterpret(t *testing.T) {
 
 	p.ReadMessage()
 	msg, err := p.ReadMessage()
-	if msg == nil || err != nil {
+	if err != nil {
 		t.Error("ReadMessage failed", err)
 	}
 
