@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"runtime"
 	"sync"
 )
 
@@ -39,7 +38,7 @@ type MessageHeader struct {
 	DomainId       uint32
 }
 
-func (h *MessageHeader) Unmarshal(bs []byte) {
+func (h *MessageHeader) unmarshal(bs []byte) {
 	h.Version = binary.BigEndian.Uint16(bs[0:])
 	h.Length = binary.BigEndian.Uint16(bs[2:])
 	h.ExportTime = binary.BigEndian.Uint32(bs[2+2:])
@@ -101,9 +100,11 @@ func NewSession(reader io.Reader) *Session {
 	return &s
 }
 
-var msgHeaderLength = binary.Size(MessageHeader{})
-var setHeaderLength = binary.Size(setHeader{})
-var templateHeaderLength = binary.Size(templateHeader{})
+const (
+	msgHeaderLength      = 2 + 2 + 4 + 4 + 4
+	setHeaderLength      = 2 + 2
+	templateHeaderLength = 2 + 2
+)
 
 // readerFrom is the relevant part of a net.PacketConn
 type readerFrom interface {
@@ -115,16 +116,6 @@ type readerFrom interface {
 // recoverable -- once an error has been returned, ReadMessage should not be
 // called again on the same session.
 func (s *Session) ReadMessage() (msg Message, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			if _, ok := r.(runtime.Error); ok {
-				panic(r)
-			}
-
-			err = r.(error)
-		}
-	}()
-
 	if pc, ok := s.reader.(readerFrom); ok {
 		return s.readFromPacketConn(pc)
 	} else {
@@ -145,7 +136,7 @@ func (s *Session) readFromPacketConn(pc readerFrom) (Message, error) {
 	bs := buf[:n]
 
 	var msg Message
-	msg.Header.Unmarshal(bs)
+	msg.Header.unmarshal(bs)
 	bs = bs[msgHeaderLength:]
 	if debug {
 		log.Printf("read pktheader: %#v", msg.Header)
@@ -154,10 +145,10 @@ func (s *Session) readFromPacketConn(pc readerFrom) (Message, error) {
 		return Message{}, ErrVersion
 	}
 
-	msg.TemplateRecords, msg.DataRecords = s.readBuffer(bs)
+	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(bs)
 
 	s.buffers.Put(buf)
-	return msg, nil
+	return msg, err
 }
 
 func (s *Session) readFromStream(sr io.Reader) (Message, error) {
@@ -168,11 +159,11 @@ func (s *Session) readFromStream(sr io.Reader) (Message, error) {
 	buf := s.buffers.Get().([]byte)
 	_, err := io.ReadFull(sr, buf[:msgHeaderLength])
 	if err != nil {
-		panic(err)
+		return Message{}, err
 	}
 
 	var msg Message
-	msg.Header.Unmarshal(buf)
+	msg.Header.unmarshal(buf)
 
 	if debug {
 		log.Printf("read pktheader: %#v", msg.Header)
@@ -191,25 +182,29 @@ func (s *Session) readFromStream(sr io.Reader) (Message, error) {
 		return Message{}, err
 	}
 
-	msg.TemplateRecords, msg.DataRecords = s.readBuffer(msgSlice)
+	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(msgSlice)
 
 	s.buffers.Put(buf)
 
-	return msg, nil
+	return msg, err
 }
 
-func (s *Session) readBuffer(bs []byte) ([]TemplateRecord, []DataRecord) {
+func (s *Session) readBuffer(bs []byte) ([]TemplateRecord, []DataRecord, error) {
 	var ts, trecs []TemplateRecord
 	var ds, drecs []DataRecord
+	var err error
 	for len(bs) > 0 {
-		ts, ds, bs = s.readSet(bs)
+		ts, ds, bs, err = s.readSet(bs)
+		if err != nil {
+			return nil, nil, err
+		}
 		trecs = append(trecs, ts...)
 		drecs = append(drecs, ds...)
 	}
-	return trecs, drecs
+	return trecs, drecs, nil
 }
 
-func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte) {
+func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, error) {
 	var trecs []TemplateRecord
 	var drecs []DataRecord
 
@@ -218,14 +213,13 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte) {
 	setHdr.Length, bs = binary.BigEndian.Uint16(bs), bs[2:]
 	if debug {
 		log.Printf("read setheader: %#v", setHdr)
-		log.Println(setHdr.Length, len(bs))
 	}
 	rest := bs[int(setHdr.Length)-setHeaderLength:]
 
 	for len(bs) > 0 {
 		if len(bs) < int(s.minRecord[setHdr.SetId]) {
 			// Padding
-			return trecs, drecs, rest
+			return trecs, drecs, rest, nil
 		} else if setHdr.SetId == 2 {
 			if debug {
 				log.Println("got template set")
@@ -277,7 +271,11 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte) {
 			if tpl := s.templates[setHdr.SetId]; tpl != nil {
 				// Data set
 				var ds DataRecord
-				ds, bs = s.readDataRecord(bs, tpl)
+				var err error
+				ds, bs, err = s.readDataRecord(bs, tpl)
+				if err != nil {
+					return nil, nil, nil, err
+				}
 				ds.TemplateId = setHdr.SetId
 				drecs = append(drecs, ds)
 			} else {
@@ -287,29 +285,49 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte) {
 				// Data set with unknown template
 				// We can't trust set length, because we might be out of sync.
 				// Consume rest of message.
-				return nil, nil, nil
+				return trecs, drecs, nil, nil
 			}
 		}
 	}
 
-	return trecs, drecs, rest
+	return trecs, drecs, rest, nil
 }
 
-func (s *Session) readDataRecord(bs []byte, tpl []TemplateFieldSpecifier) (DataRecord, []byte) {
+func (s *Session) readDataRecord(bs []byte, tpl []TemplateFieldSpecifier) (DataRecord, []byte, error) {
 	ds := DataRecord{}
 	ds.Fields = make([][]byte, len(tpl))
 
+	var err error
+	total := 0
 	for i := range tpl {
 		var val []byte
 		if tpl[i].Length == 65535 {
-			val, bs = s.readVariableLength(bs)
+			val, bs, err = s.readVariableLength(bs)
+			if err != nil {
+				return DataRecord{}, nil, err
+			}
 		} else {
-			val, bs = s.readFixedLength(bs, int(tpl[i].Length))
+			l := int(tpl[i].Length)
+			val, bs = bs[:l], bs[l:]
 		}
 		ds.Fields[i] = val
+		total += len(val)
 	}
 
-	return ds, bs
+	// The loop above keeps slices of the original buffer. But that buffer
+	// will be recycled so we need to copy them to separate storage. It's more
+	// efficient to do it this way, with a single allocation at the end that
+	// doing individual allocations along the way.
+
+	cp := make([]byte, total)
+	next := 0
+	for i := range ds.Fields {
+		ln := copy(cp[next:], ds.Fields[i])
+		ds.Fields[i] = cp[next : next+ln]
+		next += ln
+	}
+
+	return ds, bs, nil
 }
 
 func (s *Session) readTemplateRecord(bs []byte) (TemplateRecord, []byte) {
@@ -334,7 +352,7 @@ func (s *Session) readTemplateRecord(bs []byte) (TemplateRecord, []byte) {
 	return ts, bs
 }
 
-func (s *Session) readVariableLength(bs []byte) (val, rest []byte) {
+func (s *Session) readVariableLength(bs []byte) (val, rest []byte, err error) {
 	var l int
 
 	l0, bs := bs[0], bs[1:]
@@ -344,14 +362,8 @@ func (s *Session) readVariableLength(bs []byte) (val, rest []byte) {
 		l, bs = int(binary.BigEndian.Uint16(bs)), bs[2:]
 	}
 
-	return s.readFixedLength(bs, l)
-}
-
-func (s *Session) readFixedLength(bs []byte, l int) (val, rest []byte) {
 	if l > len(bs) {
-		panic(ErrRead)
+		return nil, nil, io.EOF
 	}
-	val = make([]byte, l)
-	copy(val, bs)
-	return val, bs[l:]
+	return bs[:l], bs[l:], nil
 }
