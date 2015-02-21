@@ -5,7 +5,12 @@
 Package ipfix implements an IPFIX (RFC 5101) parser and interpreter.
 
 [![Build
-Status](https://drone.io/github.com/calmh/ipfix/status.png)](https://drone.io/github.com/calmh/ipfix/latest)
+Status](https://img.shields.io/travis/calmh/ipfix.svg?style=flat-square)](https://travis-ci.org/calmh/ipfix)
+[![API
+Documentation](http://img.shields.io/badge/api-Godoc-blue.svg?style=flat-square)](http://godoc.org/github.com/calmh/ipfix)
+[![MIT
+License](http://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](http://opensource.org/licenses/MIT)
+
 
 An input stream in the form of an io.Reader is read and chunked into messages.
 Template management and the standard IPFIX types are implemented so a fully
