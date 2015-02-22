@@ -80,17 +80,17 @@ type TemplateFieldSpecifier struct {
 
 // The Session is the context for IPFIX messages.
 type Session struct {
+	buffers *sync.Pool
+
+	mut       sync.RWMutex
 	templates [][]TemplateFieldSpecifier
-	reader    io.Reader
 	minRecord []uint16
-	buffers   *sync.Pool
 }
 
 // NewSession initializes a new Session based on the provided io.Reader.
-func NewSession(reader io.Reader) *Session {
+func NewSession() *Session {
 	s := Session{}
 	s.templates = make([][]TemplateFieldSpecifier, 65536)
-	s.reader = reader
 	s.minRecord = make([]uint16, 65536)
 	s.buffers = &sync.Pool{
 		New: func() interface{} {
@@ -115,27 +115,19 @@ type readerFrom interface {
 // as err is nil, further messages can be read from the stream. Errors are not
 // recoverable -- once an error has been returned, ReadMessage should not be
 // called again on the same session.
-func (s *Session) ReadMessage() (msg Message, err error) {
-	if pc, ok := s.reader.(readerFrom); ok {
+func (s *Session) ReadMessage(reader io.Reader) (msg Message, err error) {
+	if pc, ok := reader.(readerFrom); ok {
 		return s.readFromPacketConn(pc)
 	} else {
-		return s.readFromStream(s.reader)
+		return s.readFromStream(reader)
 	}
 }
 
-func (s *Session) readFromPacketConn(pc readerFrom) (Message, error) {
-	if debug {
-		log.Println("read from net.PacketConn")
-	}
-
-	buf := s.buffers.Get().([]byte)
-	n, _, err := pc.ReadFrom(buf)
-	if err != nil {
-		return Message{}, err
-	}
-	bs := buf[:n]
-
+// ParseBuffer extracts one message from the given buffer and returns it. Err
+// is nil if the buffer could be parsed correctly. ParseBuffer is goroutine safe.
+func (s *Session) ParseBuffer(bs []byte) (Message, error) {
 	var msg Message
+
 	msg.Header.unmarshal(bs)
 	bs = bs[msgHeaderLength:]
 	if debug {
@@ -145,10 +137,26 @@ func (s *Session) readFromPacketConn(pc readerFrom) (Message, error) {
 		return Message{}, ErrVersion
 	}
 
+	var err error
 	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(bs)
-
-	s.buffers.Put(buf)
 	return msg, err
+}
+
+func (s *Session) readFromPacketConn(pc readerFrom) (Message, error) {
+	if debug {
+		log.Println("read from net.PacketConn")
+	}
+
+	buf := s.buffers.Get().([]byte)
+	defer s.buffers.Put(buf)
+
+	n, _, err := pc.ReadFrom(buf)
+	if err != nil {
+		return Message{}, err
+	}
+	bs := buf[:n]
+
+	return s.ParseBuffer(bs)
 }
 
 func (s *Session) readFromStream(sr io.Reader) (Message, error) {
@@ -216,8 +224,12 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 	}
 	rest := bs[int(setHdr.Length)-setHeaderLength:]
 
+	s.mut.RLock()
+	minLength := int(s.minRecord[setHdr.SetId])
+	s.mut.RUnlock()
+
 	for len(bs) > 0 {
-		if len(bs) < int(s.minRecord[setHdr.SetId]) {
+		if len(bs) < minLength {
 			// Padding
 			return trecs, drecs, rest, nil
 		} else if setHdr.SetId == 2 {
@@ -226,36 +238,18 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 			}
 
 			// Template Set
-			var ts TemplateRecord
-			ts, bs = s.readTemplateRecord(bs)
-			trecs = append(trecs, ts)
+			var tr TemplateRecord
+			tr, bs = s.readTemplateRecord(bs)
+			trecs = append(trecs, tr)
 
 			if debug {
-				log.Println("template for set", ts.TemplateId)
-				for _, t := range ts.FieldSpecifiers {
+				log.Println("template for set", tr.TemplateId)
+				for _, t := range tr.FieldSpecifiers {
 					log.Printf("    %v", t)
 				}
 			}
 
-			// Update the template cache
-			tid := ts.TemplateId
-			if len(ts.FieldSpecifiers) == 0 {
-				// Set was withdrawn
-				s.templates[tid] = nil
-			} else {
-				s.templates[tid] = ts.FieldSpecifiers
-			}
-
-			// Update the minimum record length cache
-			var minLength uint16
-			for i := range ts.FieldSpecifiers {
-				if ts.FieldSpecifiers[i].Length == 65535 {
-					minLength += 1
-				} else {
-					minLength += ts.FieldSpecifiers[i].Length
-				}
-			}
-			s.minRecord[tid] = minLength
+			s.registerTemplateRecord(tr)
 		} else if setHdr.SetId == 3 {
 			if debug {
 				log.Println("got options template set, unhandled")
@@ -268,7 +262,11 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 				log.Println("got data set for template", setHdr.SetId)
 			}
 
-			if tpl := s.templates[setHdr.SetId]; tpl != nil {
+			s.mut.RLock()
+			tpl := s.templates[setHdr.SetId]
+			s.mut.RUnlock()
+
+			if tpl != nil {
 				// Data set
 				var ds DataRecord
 				var err error
@@ -366,4 +364,30 @@ func (s *Session) readVariableLength(bs []byte) (val, rest []byte, err error) {
 		return nil, nil, io.EOF
 	}
 	return bs[:l], bs[l:], nil
+}
+
+func (s *Session) registerTemplateRecord(tr TemplateRecord) {
+	// Update the template cache
+	tid := tr.TemplateId
+
+	// Calculate the minimum possible record length
+	var minLength uint16
+	for i := range tr.FieldSpecifiers {
+		if tr.FieldSpecifiers[i].Length == 65535 {
+			minLength += 1
+		} else {
+			minLength += tr.FieldSpecifiers[i].Length
+		}
+	}
+
+	// Update templates and minimum record cache
+	s.mut.Lock()
+	if len(tr.FieldSpecifiers) == 0 {
+		// Set was withdrawn
+		s.templates[tid] = nil
+	} else {
+		s.templates[tid] = tr.FieldSpecifiers
+	}
+	s.minRecord[tid] = minLength
+	s.mut.Unlock()
 }
