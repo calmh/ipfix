@@ -102,7 +102,7 @@ func NewInterpreter(s *Session) *Interpreter {
 }
 
 // Interpret a raw DataRecord into a list of InterpretedFields.
-func (i *Interpreter) Interpret(ds *DataRecord) []InterpretedField {
+func (i *Interpreter) Interpret(ds DataRecord) []InterpretedField {
 	tpl := i.session.templates[ds.TemplateId]
 	if tpl == nil {
 		return nil
@@ -126,7 +126,7 @@ func (i *Interpreter) Interpret(ds *DataRecord) []InterpretedField {
 
 // Interpret a raw DataRecord into a list of InterpretedFields. Uses the given
 // fieldList if it is long enough to fit the record.
-func (i *Interpreter) InterpretInto(ds *DataRecord, fieldList []InterpretedField) []InterpretedField {
+func (i *Interpreter) InterpretInto(ds DataRecord, fieldList []InterpretedField) []InterpretedField {
 	tpl := i.session.templates[ds.TemplateId]
 	if tpl == nil {
 		return nil
@@ -153,7 +153,7 @@ func (i *Interpreter) InterpretInto(ds *DataRecord, fieldList []InterpretedField
 }
 
 // Interpret a raw DataRecord into a map of InterpretedFields.
-func (i *Interpreter) InterpretMap(ds *DataRecord) map[string]InterpretedField {
+func (i *Interpreter) InterpretMap(ds DataRecord) map[string]InterpretedField {
 	tpl := i.session.templates[ds.TemplateId]
 	if tpl == nil {
 		return nil

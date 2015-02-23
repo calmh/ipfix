@@ -102,7 +102,7 @@ func TestInterpret(t *testing.T) {
 	expected0 := InterpretedField{Name: "destinationIPv4Address", FieldId: 12, EnterpriseId: 0, Value: net.IP{172, 16, 32, 15}}
 	expected1 := InterpretedField{Name: "", FieldId: 12, EnterpriseId: 15397, RawValue: []byte{0, 0, 0, 0}}
 
-	fl := i.Interpret(&msg.DataRecords[0])
+	fl := i.Interpret(msg.DataRecords[0])
 	for _, f := range fl {
 		t.Logf("%#v", f)
 	}
@@ -113,7 +113,7 @@ func TestInterpret(t *testing.T) {
 		t.Error(fl[1], "!=\n", expected1)
 	}
 
-	fl = i.InterpretInto(&msg.DataRecords[0], make([]InterpretedField, len(fl)))
+	fl = i.InterpretInto(msg.DataRecords[0], make([]InterpretedField, len(fl)))
 	for _, f := range fl {
 		t.Logf("%#v", f)
 	}
@@ -124,7 +124,7 @@ func TestInterpret(t *testing.T) {
 		t.Error(fl[1], "!=\n", expected1)
 	}
 
-	fm := i.InterpretMap(&msg.DataRecords[0])
+	fm := i.InterpretMap(msg.DataRecords[0])
 	t.Logf("%#v", fm)
 	if !reflect.DeepEqual(fm["destinationIPv4Address"], expected0) {
 		t.Error(fl[0], "!=\n", expected0)
@@ -154,7 +154,7 @@ func BenchmarkInterpret(b *testing.B) {
 
 	for j := 0; j < b.N; j++ {
 		for k := range msg.DataRecords {
-			i.Interpret(&msg.DataRecords[k])
+			i.Interpret(msg.DataRecords[k])
 		}
 	}
 
@@ -184,7 +184,7 @@ func BenchmarkInterpretMap(b *testing.B) {
 
 	for j := 0; j < b.N; j++ {
 		for k := range msg.DataRecords {
-			i.InterpretMap(&msg.DataRecords[k])
+			i.InterpretMap(msg.DataRecords[k])
 		}
 	}
 
@@ -215,7 +215,7 @@ func BenchmarkInterpretInto(b *testing.B) {
 	var l []InterpretedField
 	for j := 0; j < b.N; j++ {
 		for k := range msg.DataRecords {
-			l = i.InterpretInto(&msg.DataRecords[k], l)
+			l = i.InterpretInto(msg.DataRecords[k], l)
 		}
 	}
 
