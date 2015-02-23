@@ -166,11 +166,8 @@ func (i *Interpreter) InterpretMap(ds *DataRecord) map[string]InterpretedField {
 		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
 			intf.Name = entry.Name
 			intf.Value = interpretBytes(ds.Fields[j], entry.Type)
-		} else {
-			intf.RawValue = ds.Fields[j]
+			fieldMap[intf.Name] = intf
 		}
-
-		fieldMap[intf.Name] = intf
 	}
 
 	return fieldMap
