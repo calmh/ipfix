@@ -64,13 +64,13 @@ func TestInterpretBool(t *testing.T) {
 	bs := []byte{8}
 	v := interpretBytes(bs, Boolean)
 	if v != true {
-		t.Errorf("%d != %d", v, true)
+		t.Errorf("%v != %v", v, true)
 	}
 
 	bs = []byte{0}
 	v = interpretBytes(bs, Boolean)
 	if v != false {
-		t.Errorf("%d != %d", v, true)
+		t.Errorf("%v != %v", v, true)
 	}
 }
 
@@ -78,7 +78,7 @@ func TestInterpretString(t *testing.T) {
 	bs := []byte{0x48, 0x61, 0x6c, 0x6c, 0xc3, 0xa5, 0x0a}
 	v := interpretBytes(bs, String)
 	if v != "Hallå\n" {
-		t.Errorf("%d != %d", v, "Hallå\n")
+		t.Errorf("%v != %v", v, "Hallå\n")
 	}
 }
 
