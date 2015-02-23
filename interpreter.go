@@ -72,6 +72,11 @@ type DictionaryEntry struct {
 	Type         FieldType
 }
 
+func (f *FieldType) UnmarshalText(bs []byte) error {
+	*f = FieldTypes[string(bs)]
+	return nil
+}
+
 type dictionaryKey struct {
 	EnterpriseId uint32
 	FieldId      uint16
