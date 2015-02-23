@@ -4,13 +4,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"log"
 	"net"
-	"os"
 	"sync"
 )
-
-var debug = os.Getenv("IPFIXDEBUG") != ""
 
 // The version field in IPFIX messages should always have the value 10. If it
 // does not, you get this error. It's probably a sign of a bug in the parser or
@@ -130,9 +126,6 @@ func (s *Session) ParseBuffer(bs []byte) (Message, error) {
 
 	msg.Header.unmarshal(bs)
 	bs = bs[msgHeaderLength:]
-	if debug {
-		log.Printf("read pktheader: %#v", msg.Header)
-	}
 	if msg.Header.Version != 10 {
 		return Message{}, ErrVersion
 	}
@@ -143,10 +136,6 @@ func (s *Session) ParseBuffer(bs []byte) (Message, error) {
 }
 
 func (s *Session) readFromPacketConn(pc readerFrom) (Message, error) {
-	if debug {
-		log.Println("read from net.PacketConn")
-	}
-
 	buf := s.buffers.Get().([]byte)
 	defer s.buffers.Put(buf)
 
@@ -160,10 +149,6 @@ func (s *Session) readFromPacketConn(pc readerFrom) (Message, error) {
 }
 
 func (s *Session) readFromStream(sr io.Reader) (Message, error) {
-	if debug {
-		log.Println("read from io.Reader")
-	}
-
 	buf := s.buffers.Get().([]byte)
 	_, err := io.ReadFull(sr, buf[:msgHeaderLength])
 	if err != nil {
@@ -173,9 +158,6 @@ func (s *Session) readFromStream(sr io.Reader) (Message, error) {
 	var msg Message
 	msg.Header.unmarshal(buf)
 
-	if debug {
-		log.Printf("read pktheader: %#v", msg.Header)
-	}
 	if msg.Header.Version != 10 {
 		return Message{}, ErrVersion
 	}
@@ -219,9 +201,6 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 	setHdr := setHeader{}
 	setHdr.SetId, bs = binary.BigEndian.Uint16(bs), bs[2:]
 	setHdr.Length, bs = binary.BigEndian.Uint16(bs), bs[2:]
-	if debug {
-		log.Printf("read setheader: %#v", setHdr)
-	}
 	rest := bs[int(setHdr.Length)-setHeaderLength:]
 
 	s.mut.RLock()
@@ -233,35 +212,16 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 			// Padding
 			return trecs, drecs, rest, nil
 		} else if setHdr.SetId == 2 {
-			if debug {
-				log.Println("got template set")
-			}
-
 			// Template Set
 			var tr TemplateRecord
 			tr, bs = s.readTemplateRecord(bs)
 			trecs = append(trecs, tr)
 
-			if debug {
-				log.Println("template for set", tr.TemplateId)
-				for _, t := range tr.FieldSpecifiers {
-					log.Printf("    %v", t)
-				}
-			}
-
 			s.registerTemplateRecord(tr)
 		} else if setHdr.SetId == 3 {
-			if debug {
-				log.Println("got options template set, unhandled")
-			}
-
 			// Options Template Set, not handled
 			bs = bs[len(bs):]
 		} else {
-			if debug {
-				log.Println("got data set for template", setHdr.SetId)
-			}
-
 			s.mut.RLock()
 			tpl := s.templates[setHdr.SetId]
 			s.mut.RUnlock()
@@ -277,9 +237,6 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 				ds.TemplateId = setHdr.SetId
 				drecs = append(drecs, ds)
 			} else {
-				if debug {
-					log.Println("set", setHdr.SetId, "is unknown")
-				}
 				// Data set with unknown template
 				// We can't trust set length, because we might be out of sync.
 				// Consume rest of message.
