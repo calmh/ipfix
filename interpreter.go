@@ -2,7 +2,6 @@ package ipfix
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
 	"net"
 )
@@ -109,7 +108,20 @@ func (i *Interpreter) Interpret(ds *DataRecord) []InterpretedField {
 		return nil
 	}
 	fieldList := make([]InterpretedField, len(tpl))
-	return i.InterpretInto(ds, fieldList)
+
+	for j, field := range tpl {
+		fieldList[j].FieldId = field.FieldId
+		fieldList[j].EnterpriseId = field.EnterpriseId
+
+		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
+			fieldList[j].Name = entry.Name
+			fieldList[j].Value = interpretBytes(ds.Fields[j], entry.Type)
+		} else {
+			fieldList[j].RawValue = ds.Fields[j]
+		}
+	}
+
+	return fieldList
 }
 
 // Interpret a raw DataRecord into a list of InterpretedFields. Uses the given
@@ -133,7 +145,6 @@ func (i *Interpreter) InterpretInto(ds *DataRecord, fieldList []InterpretedField
 			fieldList[j].Name = entry.Name
 			fieldList[j].Value = interpretBytes(ds.Fields[j], entry.Type)
 		} else {
-			fieldList[j].Name = fmt.Sprintf("%d-%d", field.EnterpriseId, field.FieldId)
 			fieldList[j].RawValue = ds.Fields[j]
 		}
 	}
@@ -156,7 +167,6 @@ func (i *Interpreter) InterpretMap(ds *DataRecord) map[string]InterpretedField {
 			intf.Name = entry.Name
 			intf.Value = interpretBytes(ds.Fields[j], entry.Type)
 		} else {
-			intf.Name = fmt.Sprintf("%d-%d", intf.EnterpriseId, intf.FieldId)
 			intf.RawValue = ds.Fields[j]
 		}
 
