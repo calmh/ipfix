@@ -15,29 +15,8 @@ produced. Vendor fields can be added at runtime.
 ## Example
 
 To read an IPFIX stream, create a Session around a Reader, then call
-ReadMessage repeatedly.
+ParseReader repeatedly.
 
-    s := ipfix.NewSession(os.Stdin)
-    i := ipfix.NewInterpreter(s)
-
-    for {
-    	// ReadMessage will block until a full message is available.
-    	msg, err := s.ReadMessage()
-    	if err != nil {
-    		panic(err)
-    	}
-
-    	for _, record := range msg.DataRecords {
-    		// record contains raw enterpriseId, fieldId => []byte information
-    		fmt.Println(record)
-
-    		fieldsMap := i.Interpret(&record)
-    		// fieldsMap is a map[string]interface{}, with types
-    		// resolved to their natural equivalents and field
-    		// names resolved for standard fields.
-    		fmt.Println(fieldsMap)
-    	}
-    }
 
 To add a vendor field to the dictionary so that it will be resolved by
 Interpret, create a DictionaryEntry and call AddDictionaryEntry.

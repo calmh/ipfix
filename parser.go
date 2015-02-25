@@ -107,75 +107,32 @@ type readerFrom interface {
 	ReadFrom([]byte) (int, net.Addr, error)
 }
 
-// ReadMessage extracts and returns one message from the IPFIX stream. As long
+// ParseReader extracts and returns one message from the IPFIX stream. As long
 // as err is nil, further messages can be read from the stream. Errors are not
-// recoverable -- once an error has been returned, ReadMessage should not be
+// recoverable -- once an error has been returned, ParseReader should not be
 // called again on the same session.
-func (s *Session) ReadMessage(reader io.Reader) (msg Message, err error) {
-	if pc, ok := reader.(readerFrom); ok {
-		return s.readFromPacketConn(pc)
-	} else {
-		return s.readFromStream(reader)
+func (s *Session) ParseReader(r io.Reader) (Message, error) {
+	bs := s.buffers.Get().([]byte)
+	bs, hdr, err := Read(r, bs)
+	if err != nil {
+		return Message{}, err
 	}
+
+	var msg Message
+	msg.Header = hdr
+	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(bs[msgHeaderLength:])
+	s.buffers.Put(bs)
+	return msg, err
 }
 
 // ParseBuffer extracts one message from the given buffer and returns it. Err
 // is nil if the buffer could be parsed correctly. ParseBuffer is goroutine safe.
 func (s *Session) ParseBuffer(bs []byte) (Message, error) {
 	var msg Message
+	var err error
 
 	msg.Header.unmarshal(bs)
-	bs = bs[msgHeaderLength:]
-	if msg.Header.Version != 10 {
-		return Message{}, ErrVersion
-	}
-
-	var err error
-	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(bs)
-	return msg, err
-}
-
-func (s *Session) readFromPacketConn(pc readerFrom) (Message, error) {
-	buf := s.buffers.Get().([]byte)
-	defer s.buffers.Put(buf)
-
-	n, _, err := pc.ReadFrom(buf)
-	if err != nil {
-		return Message{}, err
-	}
-	bs := buf[:n]
-
-	return s.ParseBuffer(bs)
-}
-
-func (s *Session) readFromStream(sr io.Reader) (Message, error) {
-	buf := s.buffers.Get().([]byte)
-	_, err := io.ReadFull(sr, buf[:msgHeaderLength])
-	if err != nil {
-		return Message{}, err
-	}
-
-	var msg Message
-	msg.Header.unmarshal(buf)
-
-	if msg.Header.Version != 10 {
-		return Message{}, ErrVersion
-	}
-
-	msgLen := int(msg.Header.Length) - msgHeaderLength
-	if msgLen > 65535 {
-		panic("unexpectedly long message, need to unoptimize")
-	}
-	msgSlice := buf[:msgLen]
-	_, err = io.ReadFull(sr, msgSlice)
-	if err != nil {
-		return Message{}, err
-	}
-
-	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(msgSlice)
-
-	s.buffers.Put(buf)
-
+	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(bs[msgHeaderLength:])
 	return msg, err
 }
 
@@ -188,8 +145,16 @@ func (s *Session) readBuffer(bs []byte) ([]TemplateRecord, []DataRecord, error) 
 		if err != nil {
 			return nil, nil, err
 		}
-		trecs = append(trecs, ts...)
-		drecs = append(drecs, ds...)
+		if trecs == nil {
+			trecs = ts
+		} else {
+			trecs = append(trecs, ts...)
+		}
+		if drecs == nil {
+			drecs = ds
+		} else {
+			drecs = append(drecs, ds...)
+		}
 	}
 	return trecs, drecs, nil
 }
@@ -201,7 +166,11 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 	setHdr := setHeader{}
 	setHdr.SetId, bs = binary.BigEndian.Uint16(bs), bs[2:]
 	setHdr.Length, bs = binary.BigEndian.Uint16(bs), bs[2:]
-	rest := bs[int(setHdr.Length)-setHeaderLength:]
+	setLen := int(setHdr.Length) - setHeaderLength
+	if setLen > len(bs) {
+		return nil, nil, nil, ErrRead
+	}
+	rest := bs[setLen:]
 
 	s.mut.RLock()
 	minLength := int(s.minRecord[setHdr.SetId])

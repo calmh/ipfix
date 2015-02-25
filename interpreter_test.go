@@ -91,10 +91,10 @@ func TestInterpret(t *testing.T) {
 	b.Write(p0)
 	b.Write(p1)
 
-	p.ReadMessage(b)
-	msg, err := p.ReadMessage(b)
+	p.ParseReader(b)
+	msg, err := p.ParseReader(b)
 	if err != nil {
-		t.Error("ReadMessage failed", err)
+		t.Fatal("ParseReader failed", err)
 	}
 
 	i := NewInterpreter(p)
@@ -139,15 +139,15 @@ func BenchmarkInterpret(b *testing.B) {
 
 	p := NewSession()
 	i := NewInterpreter(p)
-	_, err := p.ReadMessage(pb)
+	_, err := p.ParseReader(pb)
 	if err != nil {
-		b.Error("ReadMessage failed", err)
+		b.Fatal("ParseReader failed", err)
 	}
 
 	pb.Write(p1)
-	msg, err := p.ReadMessage(pb)
+	msg, err := p.ParseReader(pb)
 	if err != nil {
-		b.Error("ReadMessage failed", err)
+		b.Fatal("ParseReader failed", err)
 	}
 
 	b.ResetTimer()
@@ -169,15 +169,15 @@ func BenchmarkInterpretMap(b *testing.B) {
 
 	p := NewSession()
 	i := NewInterpreter(p)
-	_, err := p.ReadMessage(pb)
+	_, err := p.ParseReader(pb)
 	if err != nil {
-		b.Error("ReadMessage failed", err)
+		b.Fatal("ParseReader failed", err)
 	}
 
 	pb.Write(p1)
-	msg, err := p.ReadMessage(pb)
+	msg, err := p.ParseReader(pb)
 	if err != nil {
-		b.Error("ReadMessage failed", err)
+		b.Fatal("ParseReader failed", err)
 	}
 
 	b.ResetTimer()
@@ -199,15 +199,15 @@ func BenchmarkInterpretInto(b *testing.B) {
 
 	p := NewSession()
 	i := NewInterpreter(p)
-	_, err := p.ReadMessage(pb)
+	_, err := p.ParseReader(pb)
 	if err != nil {
-		b.Error("ReadMessage failed", err)
+		b.Fatal("ParseReader failed", err)
 	}
 
 	pb.Write(p1)
-	msg, err := p.ReadMessage(pb)
+	msg, err := p.ParseReader(pb)
 	if err != nil {
-		b.Error("ReadMessage failed", err)
+		b.Fatal("ParseReader failed", err)
 	}
 
 	b.ResetTimer()

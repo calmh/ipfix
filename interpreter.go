@@ -102,8 +102,8 @@ func NewInterpreter(s *Session) *Interpreter {
 }
 
 // Interpret a raw DataRecord into a list of InterpretedFields.
-func (i *Interpreter) Interpret(ds DataRecord) []InterpretedField {
-	tpl := i.session.templates[ds.TemplateId]
+func (i *Interpreter) Interpret(rec DataRecord) []InterpretedField {
+	tpl := i.session.templates[rec.TemplateId]
 	if tpl == nil {
 		return nil
 	}
@@ -115,9 +115,9 @@ func (i *Interpreter) Interpret(ds DataRecord) []InterpretedField {
 
 		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
 			fieldList[j].Name = entry.Name
-			fieldList[j].Value = interpretBytes(ds.Fields[j], entry.Type)
+			fieldList[j].Value = interpretBytes(rec.Fields[j], entry.Type)
 		} else {
-			fieldList[j].RawValue = ds.Fields[j]
+			fieldList[j].RawValue = rec.Fields[j]
 		}
 	}
 
@@ -126,8 +126,8 @@ func (i *Interpreter) Interpret(ds DataRecord) []InterpretedField {
 
 // Interpret a raw DataRecord into a list of InterpretedFields. Uses the given
 // fieldList if it is long enough to fit the record.
-func (i *Interpreter) InterpretInto(ds DataRecord, fieldList []InterpretedField) []InterpretedField {
-	tpl := i.session.templates[ds.TemplateId]
+func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField) []InterpretedField {
+	tpl := i.session.templates[rec.TemplateId]
 	if tpl == nil {
 		return nil
 	}
@@ -143,9 +143,9 @@ func (i *Interpreter) InterpretInto(ds DataRecord, fieldList []InterpretedField)
 
 		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
 			fieldList[j].Name = entry.Name
-			fieldList[j].Value = interpretBytes(ds.Fields[j], entry.Type)
+			fieldList[j].Value = interpretBytes(rec.Fields[j], entry.Type)
 		} else {
-			fieldList[j].RawValue = ds.Fields[j]
+			fieldList[j].RawValue = rec.Fields[j]
 		}
 	}
 
@@ -153,8 +153,8 @@ func (i *Interpreter) InterpretInto(ds DataRecord, fieldList []InterpretedField)
 }
 
 // Interpret a raw DataRecord into a map of InterpretedFields.
-func (i *Interpreter) InterpretMap(ds DataRecord) map[string]InterpretedField {
-	tpl := i.session.templates[ds.TemplateId]
+func (i *Interpreter) InterpretMap(rec DataRecord) map[string]InterpretedField {
+	tpl := i.session.templates[rec.TemplateId]
 	if tpl == nil {
 		return nil
 	}
@@ -165,7 +165,7 @@ func (i *Interpreter) InterpretMap(ds DataRecord) map[string]InterpretedField {
 
 		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
 			intf.Name = entry.Name
-			intf.Value = interpretBytes(ds.Fields[j], entry.Type)
+			intf.Value = interpretBytes(rec.Fields[j], entry.Type)
 			fieldMap[intf.Name] = intf
 		}
 	}
