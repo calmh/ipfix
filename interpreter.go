@@ -66,8 +66,8 @@ var FieldTypes = map[string]FieldType{
 // DictionaryEntry provied a mapping between an (Enterprise, Field) pair and a Name and Type.
 type DictionaryEntry struct {
 	Name         string
-	FieldId      uint16
-	EnterpriseId uint32
+	FieldID      uint16
+	EnterpriseID uint32
 	Type         FieldType
 }
 
@@ -77,8 +77,8 @@ func (f *FieldType) UnmarshalText(bs []byte) error {
 }
 
 type dictionaryKey struct {
-	EnterpriseId uint32
-	FieldId      uint16
+	EnterpriseID uint32
+	FieldID      uint16
 }
 
 type fieldDictionary map[dictionaryKey]DictionaryEntry
@@ -90,8 +90,8 @@ type fieldDictionary map[dictionaryKey]DictionaryEntry
 // contain the original bytes.
 type InterpretedField struct {
 	Name         string
-	EnterpriseId uint32
-	FieldId      uint16
+	EnterpriseID uint32
+	FieldID      uint16
 	Value        interface{}
 	RawValue     []byte
 }
@@ -103,17 +103,17 @@ func NewInterpreter(s *Session) *Interpreter {
 
 // Interpret a raw DataRecord into a list of InterpretedFields.
 func (i *Interpreter) Interpret(rec DataRecord) []InterpretedField {
-	tpl := i.session.templates[rec.TemplateId]
+	tpl := i.session.templates[rec.TemplateID]
 	if tpl == nil {
 		return nil
 	}
 	fieldList := make([]InterpretedField, len(tpl))
 
 	for j, field := range tpl {
-		fieldList[j].FieldId = field.FieldId
-		fieldList[j].EnterpriseId = field.EnterpriseId
+		fieldList[j].FieldID = field.FieldID
+		fieldList[j].EnterpriseID = field.EnterpriseID
 
-		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
+		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseID, field.FieldID}]; ok {
 			fieldList[j].Name = entry.Name
 			fieldList[j].Value = interpretBytes(rec.Fields[j], entry.Type)
 		} else {
@@ -124,10 +124,10 @@ func (i *Interpreter) Interpret(rec DataRecord) []InterpretedField {
 	return fieldList
 }
 
-// Interpret a raw DataRecord into a list of InterpretedFields. Uses the given
-// fieldList if it is long enough to fit the record.
+// InterpretInto interprets a raw DataRecord into an existing slice of
+// InterpretedFields. If the slice is not long enouhg it will be reallocated.
 func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField) []InterpretedField {
-	tpl := i.session.templates[rec.TemplateId]
+	tpl := i.session.templates[rec.TemplateID]
 	if tpl == nil {
 		return nil
 	}
@@ -138,10 +138,10 @@ func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField
 	}
 
 	for j, field := range tpl {
-		fieldList[j].FieldId = field.FieldId
-		fieldList[j].EnterpriseId = field.EnterpriseId
+		fieldList[j].FieldID = field.FieldID
+		fieldList[j].EnterpriseID = field.EnterpriseID
 
-		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
+		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseID, field.FieldID}]; ok {
 			fieldList[j].Name = entry.Name
 			fieldList[j].Value = interpretBytes(rec.Fields[j], entry.Type)
 		} else {
@@ -152,30 +152,10 @@ func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField
 	return fieldList
 }
 
-// Interpret a raw DataRecord into a map of InterpretedFields.
-func (i *Interpreter) InterpretMap(rec DataRecord) map[string]InterpretedField {
-	tpl := i.session.templates[rec.TemplateId]
-	if tpl == nil {
-		return nil
-	}
-	fieldMap := make(map[string]InterpretedField, len(tpl))
-
-	for j, field := range tpl {
-		intf := InterpretedField{FieldId: field.FieldId, EnterpriseId: field.EnterpriseId}
-
-		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseId, field.FieldId}]; ok {
-			intf.Name = entry.Name
-			intf.Value = interpretBytes(rec.Fields[j], entry.Type)
-			fieldMap[intf.Name] = intf
-		}
-	}
-
-	return fieldMap
-}
-
-// Add a DictionaryEntry (containing a vendor field) to the dictionary used by Interpret.
+// AddDictionaryEntry adds a DictionaryEntry (containing a vendor field) to
+// the dictionary used by Interpret.
 func (i *Interpreter) AddDictionaryEntry(e DictionaryEntry) {
-	i.dictionary[dictionaryKey{e.EnterpriseId, e.FieldId}] = e
+	i.dictionary[dictionaryKey{e.EnterpriseID, e.FieldID}] = e
 }
 
 func interpretBytes(bs []byte, t FieldType) interface{} {

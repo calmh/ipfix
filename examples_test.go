@@ -35,14 +35,10 @@ func ExampleInterpreter() {
 			panic(err)
 		}
 
+		var fieldList []ipfix.InterpretedField
 		for _, record := range msg.DataRecords {
-			fieldList := i.Interpret(record)
-			// fieldList is a []ipfix.InterpretedField
+			fieldList = i.InterpretInto(record, fieldList)
 			fmt.Println(fieldList)
-
-			fieldMap := i.InterpretMap(record)
-			// fieldMap is a map[string]interface{}
-			fmt.Println(fieldMap)
 		}
 	}
 }
@@ -53,8 +49,8 @@ func ExampleInterpreter_AddDictionaryEntry() {
 
 	entry := ipfix.DictionaryEntry{
 		Name:         "someVendorField",
-		FieldId:      42,
-		EnterpriseId: 123456,
+		FieldID:      42,
+		EnterpriseID: 123456,
 		Type:         ipfix.Int32,
 	}
 

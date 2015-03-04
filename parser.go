@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"net"
 	"sync"
 )
 
@@ -13,6 +12,10 @@ import (
 // the exporter and that we have lost synchronization with the data stream.
 // Reestablishing the session is the only way forward at this point.
 var ErrVersion = errors.New("incorrect version field in message header - out of sync?")
+
+// ErrRead is returned when a packet is not long enough for the field it is
+// supposed to contain. This is a sign of an earlier read error or a corrupted
+// packet.
 var ErrRead = errors.New("short read - malformed packet?")
 
 // A Message is the top level construct representing an IPFIX message. A well
@@ -31,7 +34,7 @@ type MessageHeader struct {
 	Length         uint16
 	ExportTime     uint32 // Epoch seconds
 	SequenceNumber uint32
-	DomainId       uint32
+	DomainID       uint32
 }
 
 func (h *MessageHeader) unmarshal(bs []byte) {
@@ -39,16 +42,16 @@ func (h *MessageHeader) unmarshal(bs []byte) {
 	h.Length = binary.BigEndian.Uint16(bs[2:])
 	h.ExportTime = binary.BigEndian.Uint32(bs[2+2:])
 	h.SequenceNumber = binary.BigEndian.Uint32(bs[2+2+4:])
-	h.DomainId = binary.BigEndian.Uint32(bs[2+2+4+4:])
+	h.DomainID = binary.BigEndian.Uint32(bs[2+2+4+4:])
 }
 
 type setHeader struct {
-	SetId  uint16
+	SetID  uint16
 	Length uint16
 }
 
 type templateHeader struct {
-	TemplateId uint16
+	TemplateID uint16
 	FieldCount uint16
 }
 
@@ -56,21 +59,21 @@ type templateHeader struct {
 // different aspects of the flow (source and destination address, counters,
 // service, etc.).
 type DataRecord struct {
-	TemplateId uint16
+	TemplateID uint16
 	Fields     [][]byte
 }
 
 // The TemplateRecord describes a data template, as used by DataRecords.
 type TemplateRecord struct {
-	TemplateId      uint16
+	TemplateID      uint16
 	FieldSpecifiers []TemplateFieldSpecifier
 }
 
 // The TemplateFieldSpecifier describes the ID and size of the corresponding
 // Fields in a DataRecord.
 type TemplateFieldSpecifier struct {
-	EnterpriseId uint32
-	FieldId      uint16
+	EnterpriseID uint32
+	FieldID      uint16
 	Length       uint16
 }
 
@@ -97,15 +100,9 @@ func NewSession() *Session {
 }
 
 const (
-	msgHeaderLength      = 2 + 2 + 4 + 4 + 4
-	setHeaderLength      = 2 + 2
-	templateHeaderLength = 2 + 2
+	msgHeaderLength = 2 + 2 + 4 + 4 + 4
+	setHeaderLength = 2 + 2
 )
-
-// readerFrom is the relevant part of a net.PacketConn
-type readerFrom interface {
-	ReadFrom([]byte) (int, net.Addr, error)
-}
 
 // ParseReader extracts and returns one message from the IPFIX stream. As long
 // as err is nil, further messages can be read from the stream. Errors are not
@@ -164,7 +161,7 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 	var drecs []DataRecord
 
 	setHdr := setHeader{}
-	setHdr.SetId, bs = binary.BigEndian.Uint16(bs), bs[2:]
+	setHdr.SetID, bs = binary.BigEndian.Uint16(bs), bs[2:]
 	setHdr.Length, bs = binary.BigEndian.Uint16(bs), bs[2:]
 	setLen := int(setHdr.Length) - setHeaderLength
 	if setLen > len(bs) {
@@ -173,26 +170,26 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 	rest := bs[setLen:]
 
 	s.mut.RLock()
-	minLength := int(s.minRecord[setHdr.SetId])
+	minLength := int(s.minRecord[setHdr.SetID])
 	s.mut.RUnlock()
 
 	for len(bs) > 0 {
 		if len(bs) < minLength {
 			// Padding
 			return trecs, drecs, rest, nil
-		} else if setHdr.SetId == 2 {
+		} else if setHdr.SetID == 2 {
 			// Template Set
 			var tr TemplateRecord
 			tr, bs = s.readTemplateRecord(bs)
 			trecs = append(trecs, tr)
 
 			s.registerTemplateRecord(tr)
-		} else if setHdr.SetId == 3 {
+		} else if setHdr.SetID == 3 {
 			// Options Template Set, not handled
 			bs = bs[len(bs):]
 		} else {
 			s.mut.RLock()
-			tpl := s.templates[setHdr.SetId]
+			tpl := s.templates[setHdr.SetID]
 			s.mut.RUnlock()
 
 			if tpl != nil {
@@ -203,7 +200,7 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 				if err != nil {
 					return nil, nil, nil, err
 				}
-				ds.TemplateId = setHdr.SetId
+				ds.TemplateID = setHdr.SetID
 				drecs = append(drecs, ds)
 			} else {
 				// Data set with unknown template
@@ -257,18 +254,18 @@ func (s *Session) readDataRecord(bs []byte, tpl []TemplateFieldSpecifier) (DataR
 func (s *Session) readTemplateRecord(bs []byte) (TemplateRecord, []byte) {
 	ts := TemplateRecord{}
 	th := templateHeader{}
-	th.TemplateId, bs = binary.BigEndian.Uint16(bs), bs[2:]
+	th.TemplateID, bs = binary.BigEndian.Uint16(bs), bs[2:]
 	th.FieldCount, bs = binary.BigEndian.Uint16(bs), bs[2:]
 
-	ts.TemplateId = th.TemplateId
+	ts.TemplateID = th.TemplateID
 	ts.FieldSpecifiers = make([]TemplateFieldSpecifier, th.FieldCount)
 	for i := 0; i < int(th.FieldCount); i++ {
 		f := TemplateFieldSpecifier{}
-		f.FieldId, bs = binary.BigEndian.Uint16(bs), bs[2:]
+		f.FieldID, bs = binary.BigEndian.Uint16(bs), bs[2:]
 		f.Length, bs = binary.BigEndian.Uint16(bs), bs[2:]
-		if f.FieldId >= 0x8000 {
-			f.FieldId -= 0x8000
-			f.EnterpriseId, bs = binary.BigEndian.Uint32(bs), bs[4:]
+		if f.FieldID >= 0x8000 {
+			f.FieldID -= 0x8000
+			f.EnterpriseID, bs = binary.BigEndian.Uint32(bs), bs[4:]
 		}
 		ts.FieldSpecifiers[i] = f
 	}
@@ -294,13 +291,13 @@ func (s *Session) readVariableLength(bs []byte) (val, rest []byte, err error) {
 
 func (s *Session) registerTemplateRecord(tr TemplateRecord) {
 	// Update the template cache
-	tid := tr.TemplateId
+	tid := tr.TemplateID
 
 	// Calculate the minimum possible record length
 	var minLength uint16
 	for i := range tr.FieldSpecifiers {
 		if tr.FieldSpecifiers[i].Length == 65535 {
-			minLength += 1
+			minLength++
 		} else {
 			minLength += tr.FieldSpecifiers[i].Length
 		}
