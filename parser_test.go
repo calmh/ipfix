@@ -260,16 +260,17 @@ func BenchmarkParseReader(b *testing.B) {
 	}
 
 	b.ResetTimer()
+	b.ReportAllocs()
+	b.SetBytes(1)
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; i < b.N; {
 		pb.Write(p1)
 		msg, err = p.ParseReader(pb)
 		if err != nil {
 			b.Error("ParseReader failed", err)
 		}
+		i += len(msg.DataRecords) + len(msg.TemplateRecords)
 	}
-
-	b.SetBytes(int64(len(p1)))
 }
 
 func BenchmarkParseBuffer(b *testing.B) {
@@ -283,13 +284,14 @@ func BenchmarkParseBuffer(b *testing.B) {
 	}
 
 	b.ResetTimer()
+	b.ReportAllocs()
+	b.SetBytes(1)
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; i < b.N; {
 		msg, err = p.ParseBuffer(p1)
 		if err != nil {
 			b.Error("ParseReader failed", err)
 		}
+		i += len(msg.DataRecords) + len(msg.TemplateRecords)
 	}
-
-	b.SetBytes(int64(len(p1)))
 }

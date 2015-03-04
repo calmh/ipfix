@@ -145,14 +145,15 @@ func BenchmarkInterpret(b *testing.B) {
 	}
 
 	b.ResetTimer()
+	b.ReportAllocs()
+	b.SetBytes(1)
 
-	for j := 0; j < b.N; j++ {
+	for j := 0; j < b.N; {
 		for k := range msg.DataRecords {
 			i.Interpret(msg.DataRecords[k])
+			j++
 		}
 	}
-
-	b.SetBytes(int64(len(p1)))
 }
 
 func BenchmarkInterpretInto(b *testing.B) {
@@ -175,13 +176,14 @@ func BenchmarkInterpretInto(b *testing.B) {
 	}
 
 	b.ResetTimer()
+	b.ReportAllocs()
+	b.SetBytes(1)
 
 	var l []InterpretedField
-	for j := 0; j < b.N; j++ {
+	for j := 0; j < b.N; {
 		for k := range msg.DataRecords {
 			l = i.InterpretInto(msg.DataRecords[k], l)
+			j++
 		}
 	}
-
-	b.SetBytes(int64(len(p1)))
 }
