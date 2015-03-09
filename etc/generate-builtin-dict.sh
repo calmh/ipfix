@@ -10,7 +10,7 @@ curl -s http://www.ietf.org/rfc/rfc5102.txt | awk '
 	/Abstract Data Type:/ { type=$4; fields++ }
 	/^$/ {
 		if (fields == 3) {
-			print "dictionaryKey{0, " id "}: DictionaryEntry{Name: \"" name "\", Type: FieldTypes[\"" type "\"]},"
+			print "dictionaryKey{0, " id "}: DictionaryEntry{FieldID: " id ", Name: \"" name "\", Type: FieldTypes[\"" type "\"]},"
 			fields=0
 		}
 	}
