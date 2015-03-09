@@ -101,6 +101,8 @@ func NewInterpreter(s *Session) *Interpreter {
 	return &Interpreter{builtinDictionary, s}
 }
 
+const reversePen = 29305
+
 // Interpret a raw DataRecord into a list of InterpretedFields.
 func (i *Interpreter) Interpret(rec DataRecord) []InterpretedField {
 	tpl := i.session.templates[rec.TemplateID]
@@ -113,8 +115,20 @@ func (i *Interpreter) Interpret(rec DataRecord) []InterpretedField {
 		fieldList[j].FieldID = field.FieldID
 		fieldList[j].EnterpriseID = field.EnterpriseID
 
-		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseID, field.FieldID}]; ok {
-			fieldList[j].Name = entry.Name
+		reverse := false
+		enterpriseID := field.EnterpriseID
+
+		if enterpriseID == reversePen {
+			enterpriseID = 0
+			reverse = true
+		}
+
+		if entry, ok := i.dictionary[dictionaryKey{enterpriseID, field.FieldID}]; ok {
+			if reverse {
+				fieldList[j].Name = entry.Name + "Reverse"
+			} else {
+				fieldList[j].Name = entry.Name
+			}
 			fieldList[j].Value = interpretBytes(rec.Fields[j], entry.Type)
 		} else {
 			fieldList[j].RawValue = rec.Fields[j]
