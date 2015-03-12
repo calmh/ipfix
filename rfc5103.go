@@ -39,5 +39,5 @@ func init() {
 		}
 	}
 
-	builtinDictionary[dictionaryKey{reversePEN, 239}] = DictionaryEntry{EnterpriseID: reversePEN, FieldID: 239, Name: "biflowDirection", Type: Uint8}
+	builtinDictionary[dictionaryKey{0, 239}] = DictionaryEntry{FieldID: 239, Name: "biflowDirection", Type: Uint8}
 }

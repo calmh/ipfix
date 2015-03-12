@@ -3,15 +3,12 @@ package ipfix
 import "testing"
 
 func TestRFC5103(t *testing.T) {
-	f := builtinDictionary[dictionaryKey{29305, 239}]
+	f := builtinDictionary[dictionaryKey{0, 239}]
 	if f.Name != "biflowDirection" {
 		t.Errorf("Incorrect name for biflowDirection in %+v", f)
 	}
 	if f.FieldID != 239 {
 		t.Errorf("Incorrect field ID in %+v", f)
-	}
-	if f.EnterpriseID != 29305 {
-		t.Errorf("Incorrect reverse PEN in %+v", f)
 	}
 
 	f = builtinDictionary[dictionaryKey{29305, 85}]
