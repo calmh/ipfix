@@ -38,6 +38,4 @@ func init() {
 			builtinDictionary[k] = v
 		}
 	}
-
-	builtinDictionary[dictionaryKey{0, 239}] = DictionaryEntry{FieldID: 239, Name: "biflowDirection", Type: Uint8}
 }
