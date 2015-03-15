@@ -97,6 +97,13 @@ type InterpretedField struct {
 	RawValue     []byte
 }
 
+// An InterpretedTemplateFieldSpecifier is a template specifier with the field
+// name filled in, if found in the dictionary.
+type InterpretedTemplateFieldSpecifier struct {
+	Name string
+	TemplateFieldSpecifier
+}
+
 // NewInterpreter craets a new Interpreter based on the specified Session.
 func NewInterpreter(s *Session) *Interpreter {
 	return &Interpreter{builtinDictionary, s}
@@ -126,7 +133,7 @@ func (i *Interpreter) Interpret(rec DataRecord) []InterpretedField {
 }
 
 // InterpretInto interprets a raw DataRecord into an existing slice of
-// InterpretedFields. If the slice is not long enouhg it will be reallocated.
+// InterpretedFields. If the slice is not long enough it will be reallocated.
 func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField) []InterpretedField {
 	tpl := i.session.templates[rec.TemplateID]
 	if tpl == nil {
@@ -147,6 +154,22 @@ func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField
 			fieldList[j].Value = interpretBytes(rec.Fields[j], entry.Type)
 		} else {
 			fieldList[j].RawValue = rec.Fields[j]
+		}
+	}
+
+	return fieldList
+}
+
+// InterpretTemplate interprets a template record and adds a name to the interpreted fields, if
+// a given {EnterpriseID,FieldID} can be find in the dictionary.
+func (i *Interpreter) InterpretTemplate(rec TemplateRecord) []InterpretedTemplateFieldSpecifier {
+
+	fieldList := make([]InterpretedTemplateFieldSpecifier, len(rec.FieldSpecifiers))
+
+	for j, field := range rec.FieldSpecifiers {
+		fieldList[j].TemplateFieldSpecifier = field
+		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseID, field.FieldID}]; ok {
+			fieldList[j].Name = entry.Name
 		}
 	}
 
