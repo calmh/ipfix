@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 	"net"
+	"time"
 )
 
 // Interpreter provides translation between the raw bytes of a DataRecord
@@ -164,7 +165,7 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 		return bs[0]
 	case Uint16:
 		return binary.BigEndian.Uint16(bs)
-	case Uint32, DateTimeSeconds:
+	case Uint32:
 		return binary.BigEndian.Uint32(bs)
 	case Uint64:
 		return binary.BigEndian.Uint64(bs)
@@ -188,6 +189,17 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 		return string(bs)
 	case Ipv4Address, Ipv6Address:
 		return net.IP(bs)
+	case DateTimeSeconds:
+		return time.Unix(int64(binary.BigEndian.Uint32(bs)), 0)
+	case DateTimeMilliseconds:
+		unixTimeMs := int64(binary.BigEndian.Uint64(bs))
+		return time.Unix(0, 0).Add(time.Duration(unixTimeMs) * time.Millisecond)
+	case DateTimeMicroseconds:
+		unixTimeUs := int64(binary.BigEndian.Uint64(bs))
+		return time.Unix(0, 0).Add(time.Duration(unixTimeUs) * time.Microsecond)
+	case DateTimeNanoseconds:
+		unixTimeNs := int64(binary.BigEndian.Uint64(bs))
+		return time.Unix(0, 0).Add(time.Duration(unixTimeNs))
 	}
 	return bs
 }
