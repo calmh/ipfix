@@ -1,9 +1,12 @@
 package ipfix
 
 import (
+	"crypto/md5"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"net"
+	"os"
 	"time"
 )
 
@@ -182,6 +185,8 @@ func (i *Interpreter) AddDictionaryEntry(e DictionaryEntry) {
 	i.dictionary[dictionaryKey{e.EnterpriseID, e.FieldID}] = e
 }
 
+var md5HashSalt = []byte(os.Getenv("IPFIX_IP_HASH"))
+
 func interpretBytes(bs []byte, t FieldType) interface{} {
 	switch t {
 	case Uint8:
@@ -211,6 +216,12 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 	case String:
 		return string(bs)
 	case Ipv4Address, Ipv6Address:
+		if len(md5HashSalt) > 0 {
+			h := md5.New()
+			h.Write(md5HashSalt)
+			h.Write(bs)
+			return fmt.Sprintf("%x", h.Sum(nil))
+		}
 		return net.IP(bs)
 	case DateTimeSeconds:
 		return time.Unix(int64(binary.BigEndian.Uint32(bs)), 0)
