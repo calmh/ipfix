@@ -61,15 +61,15 @@ func TestInterpretInt(t *testing.T) {
 }
 
 func TestInterpretBool(t *testing.T) {
-	bs := []byte{8}
+	bs := []byte{2}
 	v := interpretBytes(bs, Boolean)
-	if v != true {
-		t.Errorf("%v != %v", v, true)
+	if v != false {
+		t.Errorf("%v != %v", v, false)
 	}
 
-	bs = []byte{0}
+	bs = []byte{1}
 	v = interpretBytes(bs, Boolean)
-	if v != false {
+	if v != true {
 		t.Errorf("%v != %v", v, true)
 	}
 }

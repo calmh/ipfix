@@ -210,7 +210,7 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 	case Float64:
 		return math.Float64frombits(binary.BigEndian.Uint64(bs))
 	case Boolean:
-		return bs[0] != 0
+		return bs[0] == 1
 	case MacAddress, OctetArray:
 		return bs
 	case String:
