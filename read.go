@@ -17,7 +17,7 @@ func Read(r io.Reader, bs []byte) ([]byte, MessageHeader, error) {
 	}
 
 	var hdr MessageHeader
-	hdr.unmarshal(bs)
+	hdr.unmarshal(NewSlice(bs))
 
 	if hdr.Version != 10 {
 		return nil, hdr, ErrVersion

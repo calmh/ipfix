@@ -1,7 +1,6 @@
 package ipfix
 
 import (
-	"encoding/binary"
 	"errors"
 	"io"
 	"sync"
@@ -17,6 +16,10 @@ var ErrVersion = errors.New("incorrect version field in message header - out of 
 // supposed to contain. This is a sign of an earlier read error or a corrupted
 // packet.
 var ErrRead = errors.New("short read - malformed packet?")
+
+// ErrProtocol is returned when impossible values that constitute a protocol
+// error are encountered.
+var ErrProtocol = errors.New("protocol error")
 
 // A Message is the top level construct representing an IPFIX message. A well
 // formed message contains one or more sets of data or template information.
@@ -37,12 +40,12 @@ type MessageHeader struct {
 	DomainID       uint32
 }
 
-func (h *MessageHeader) unmarshal(bs []byte) {
-	h.Version = binary.BigEndian.Uint16(bs[0:])
-	h.Length = binary.BigEndian.Uint16(bs[2:])
-	h.ExportTime = binary.BigEndian.Uint32(bs[2+2:])
-	h.SequenceNumber = binary.BigEndian.Uint32(bs[2+2+4:])
-	h.DomainID = binary.BigEndian.Uint32(bs[2+2+4+4:])
+func (h *MessageHeader) unmarshal(s *slice) {
+	h.Version = s.Uint16()
+	h.Length = s.Uint16()
+	h.ExportTime = s.Uint32()
+	h.SequenceNumber = s.Uint32()
+	h.DomainID = s.Uint32()
 }
 
 type setHeader struct {
@@ -50,9 +53,19 @@ type setHeader struct {
 	Length uint16
 }
 
+func (h *setHeader) unmarshal(s *slice) {
+	h.SetID = s.Uint16()
+	h.Length = s.Uint16()
+}
+
 type templateHeader struct {
 	TemplateID uint16
 	FieldCount uint16
+}
+
+func (h *templateHeader) unmarshal(s *slice) {
+	h.TemplateID = s.Uint16()
+	h.FieldCount = s.Uint16()
 }
 
 // The DataRecord represents a single exported flow. The Fields each describe
@@ -88,7 +101,7 @@ type Session struct {
 
 // NewSession initializes a new Session based on the provided io.Reader.
 func NewSession() *Session {
-	s := Session{}
+	var s Session
 	s.templates = make([][]TemplateFieldSpecifier, 65536)
 	s.minRecord = make([]uint16, 65536)
 	s.buffers = &sync.Pool{
@@ -115,9 +128,10 @@ func (s *Session) ParseReader(r io.Reader) (Message, error) {
 		return Message{}, err
 	}
 
+	sl := NewSlice(bs[msgHeaderLength:])
 	var msg Message
 	msg.Header = hdr
-	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(bs[msgHeaderLength:])
+	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl)
 	s.buffers.Put(bs)
 	return msg, err
 }
@@ -128,66 +142,88 @@ func (s *Session) ParseBuffer(bs []byte) (Message, error) {
 	var msg Message
 	var err error
 
-	msg.Header.unmarshal(bs)
-	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(bs[msgHeaderLength:])
+	sl := NewSlice(bs)
+	msg.Header.unmarshal(sl)
+	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl)
 	return msg, err
 }
 
-func (s *Session) readBuffer(bs []byte) ([]TemplateRecord, []DataRecord, error) {
+func (s *Session) readBuffer(sl *slice) ([]TemplateRecord, []DataRecord, error) {
 	var ts, trecs []TemplateRecord
 	var ds, drecs []DataRecord
 	var err error
-	for len(bs) > 0 {
-		ts, ds, bs, err = s.readSet(bs)
+
+	for sl.Len() > 0 {
+		// Read a set header
+		var setHdr setHeader
+		setHdr.unmarshal(sl)
+
+		// Grab the bytes representing the set
+		setLen := int(setHdr.Length) - setHeaderLength
+		setSl := NewSlice(sl.Cut(setLen))
+		if err := sl.Error(); err != nil {
+			return nil, nil, err
+		}
+
+		// Parse them
+		ts, ds, err = s.readSet(setHdr, setSl)
 		if err != nil {
 			return nil, nil, err
 		}
-		if trecs == nil {
-			trecs = ts
-		} else {
-			trecs = append(trecs, ts...)
-		}
-		if drecs == nil {
-			drecs = ds
-		} else {
-			drecs = append(drecs, ds...)
-		}
+
+		trecs = append(trecs, ts...)
+		drecs = append(drecs, ds...)
 	}
+
 	return trecs, drecs, nil
 }
 
-func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, error) {
+func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []DataRecord, error) {
 	var trecs []TemplateRecord
 	var drecs []DataRecord
-
-	setHdr := setHeader{}
-	setHdr.SetID, bs = binary.BigEndian.Uint16(bs), bs[2:]
-	setHdr.Length, bs = binary.BigEndian.Uint16(bs), bs[2:]
-	setLen := int(setHdr.Length) - setHeaderLength
-	if setLen > len(bs) {
-		return nil, nil, nil, ErrRead
-	}
-	bs, rest := bs[:setLen], bs[setLen:]
 
 	s.mut.RLock()
 	minLength := int(s.minRecord[setHdr.SetID])
 	s.mut.RUnlock()
 
-	for len(bs) > 0 {
-		if len(bs) < minLength {
+	for sl.Len() > 0 {
+		if sl.Len() < minLength {
 			// Padding
-			return trecs, drecs, rest, nil
-		} else if setHdr.SetID == 2 {
+			return trecs, drecs, sl.Error()
+		}
+
+		// Set ID
+		//
+		// Identifies the Set.  A value of 2 is reserved for Template Sets. A
+		// value of 3 is reserved for Options Template Sets.  Values from 4 to
+		// 255 are reserved for future use.  Values 256 and above are used for
+		// Data Sets.  The Set ID values of 0 and 1 are not used, for
+		// historical reasons [RFC3954].
+
+		switch {
+		case setHdr.SetID < 2:
+			// Unused, shouldn't happen
+			return nil, nil, ErrProtocol
+
+		case setHdr.SetID == 2:
 			// Template Set
 			var tr TemplateRecord
-			tr, bs = s.readTemplateRecord(bs)
+			tr = s.readTemplateRecord(sl)
 			trecs = append(trecs, tr)
 
 			s.registerTemplateRecord(tr)
-		} else if setHdr.SetID == 3 {
+
+		case setHdr.SetID == 3:
 			// Options Template Set, not handled
-			bs = bs[len(bs):]
-		} else {
+			sl.Cut(sl.Len())
+
+		case setHdr.SetID > 3 && setHdr.SetID < 256:
+			// Reserved, shouldn't happen
+			return nil, nil, ErrProtocol
+
+		default:
+			// Data set
+
 			s.mut.RLock()
 			tpl := s.templates[setHdr.SetID]
 			s.mut.RUnlock()
@@ -196,9 +232,9 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 				// Data set
 				var ds DataRecord
 				var err error
-				ds, bs, err = s.readDataRecord(bs, tpl)
+				ds, err = s.readDataRecord(sl, tpl)
 				if err != nil {
-					return nil, nil, nil, err
+					return nil, nil, err
 				}
 				ds.TemplateID = setHdr.SetID
 				drecs = append(drecs, ds)
@@ -206,16 +242,16 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 				// Data set with unknown template
 				// We can't trust set length, because we might be out of sync.
 				// Consume rest of message.
-				return trecs, drecs, nil, nil
+				return trecs, drecs, sl.Error()
 			}
 		}
 	}
 
-	return trecs, drecs, rest, nil
+	return trecs, drecs, sl.Error()
 }
 
-func (s *Session) readDataRecord(bs []byte, tpl []TemplateFieldSpecifier) (DataRecord, []byte, error) {
-	ds := DataRecord{}
+func (s *Session) readDataRecord(sl *slice, tpl []TemplateFieldSpecifier) (DataRecord, error) {
+	var ds DataRecord
 	ds.Fields = make([][]byte, len(tpl))
 
 	var err error
@@ -223,13 +259,13 @@ func (s *Session) readDataRecord(bs []byte, tpl []TemplateFieldSpecifier) (DataR
 	for i := range tpl {
 		var val []byte
 		if tpl[i].Length == 65535 {
-			val, bs, err = s.readVariableLength(bs)
+			val, err = s.readVariableLength(sl)
 			if err != nil {
-				return DataRecord{}, nil, err
+				return DataRecord{}, err
 			}
 		} else {
 			l := int(tpl[i].Length)
-			val, bs = bs[:l], bs[l:]
+			val = sl.Cut(l)
 		}
 		ds.Fields[i] = val
 		total += len(val)
@@ -237,7 +273,7 @@ func (s *Session) readDataRecord(bs []byte, tpl []TemplateFieldSpecifier) (DataR
 
 	// The loop above keeps slices of the original buffer. But that buffer
 	// will be recycled so we need to copy them to separate storage. It's more
-	// efficient to do it this way, with a single allocation at the end that
+	// efficient to do it this way, with a single allocation at the end than
 	// doing individual allocations along the way.
 
 	cp := make([]byte, total)
@@ -248,45 +284,45 @@ func (s *Session) readDataRecord(bs []byte, tpl []TemplateFieldSpecifier) (DataR
 		next += ln
 	}
 
-	return ds, bs, nil
+	return ds, sl.Error()
 }
 
-func (s *Session) readTemplateRecord(bs []byte) (TemplateRecord, []byte) {
-	ts := TemplateRecord{}
-	th := templateHeader{}
-	th.TemplateID, bs = binary.BigEndian.Uint16(bs), bs[2:]
-	th.FieldCount, bs = binary.BigEndian.Uint16(bs), bs[2:]
+func (s *Session) readTemplateRecord(sl *slice) TemplateRecord {
+	var th templateHeader
+	th.unmarshal(sl)
 
-	ts.TemplateID = th.TemplateID
-	ts.FieldSpecifiers = make([]TemplateFieldSpecifier, th.FieldCount)
+	var tr TemplateRecord
+	tr.TemplateID = th.TemplateID
+	tr.FieldSpecifiers = make([]TemplateFieldSpecifier, th.FieldCount)
 	for i := 0; i < int(th.FieldCount); i++ {
 		f := TemplateFieldSpecifier{}
-		f.FieldID, bs = binary.BigEndian.Uint16(bs), bs[2:]
-		f.Length, bs = binary.BigEndian.Uint16(bs), bs[2:]
+		f.FieldID = sl.Uint16()
+		f.Length = sl.Uint16()
 		if f.FieldID >= 0x8000 {
 			f.FieldID -= 0x8000
-			f.EnterpriseID, bs = binary.BigEndian.Uint32(bs), bs[4:]
+			f.EnterpriseID = sl.Uint32()
 		}
-		ts.FieldSpecifiers[i] = f
+		tr.FieldSpecifiers[i] = f
 	}
 
-	return ts, bs
+	return tr
 }
 
-func (s *Session) readVariableLength(bs []byte) (val, rest []byte, err error) {
+func (s *Session) readVariableLength(sl *slice) (val []byte, err error) {
 	var l int
 
-	l0, bs := bs[0], bs[1:]
+	l0 := sl.Uint8()
 	if l0 < 255 {
 		l = int(l0)
 	} else {
-		l, bs = int(binary.BigEndian.Uint16(bs)), bs[2:]
+		l = int(sl.Uint16())
 	}
 
-	if l > len(bs) {
-		return nil, nil, io.EOF
+	if l > sl.Len() {
+		return nil, io.EOF
 	}
-	return bs[:l], bs[l:], nil
+
+	return sl.Cut(l), sl.Error()
 }
 
 func (s *Session) registerTemplateRecord(tr TemplateRecord) {

@@ -22,7 +22,8 @@ type FieldType int
 
 // The available field types as defined by RFC 5102.
 const (
-	Uint8 FieldType = iota
+	Unknown FieldType = iota
+	Uint8
 	Uint16
 	Uint32
 	Uint64
@@ -67,7 +68,7 @@ var FieldTypes = map[string]FieldType{
 	"ipv6Address":          Ipv6Address,
 }
 
-// DictionaryEntry provied a mapping between an (Enterprise, Field) pair and a Name and Type.
+// DictionaryEntry provides a mapping between an (Enterprise, Field) pair and a Name and Type.
 type DictionaryEntry struct {
 	Name         string
 	FieldID      uint16
@@ -114,25 +115,7 @@ func NewInterpreter(s *Session) *Interpreter {
 
 // Interpret a raw DataRecord into a list of InterpretedFields.
 func (i *Interpreter) Interpret(rec DataRecord) []InterpretedField {
-	tpl := i.session.templates[rec.TemplateID]
-	if tpl == nil {
-		return nil
-	}
-	fieldList := make([]InterpretedField, len(tpl))
-
-	for j, field := range tpl {
-		fieldList[j].FieldID = field.FieldID
-		fieldList[j].EnterpriseID = field.EnterpriseID
-
-		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseID, field.FieldID}]; ok {
-			fieldList[j].Name = entry.Name
-			fieldList[j].Value = interpretBytes(rec.Fields[j], entry.Type)
-		} else {
-			fieldList[j].RawValue = rec.Fields[j]
-		}
-	}
-
-	return fieldList
+	return i.InterpretInto(rec, nil)
 }
 
 // InterpretInto interprets a raw DataRecord into an existing slice of
@@ -211,7 +194,7 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 		return math.Float64frombits(binary.BigEndian.Uint64(bs))
 	case Boolean:
 		return bs[0] == 1
-	case MacAddress, OctetArray:
+	case Unknown, MacAddress, OctetArray:
 		return bs
 	case String:
 		return string(bs)
