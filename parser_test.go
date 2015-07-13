@@ -295,3 +295,20 @@ func BenchmarkParseBuffer(b *testing.B) {
 		i += len(msg.DataRecords) + len(msg.TemplateRecords)
 	}
 }
+
+func TestParsingTemplateAndDataRecords(t *testing.T) {
+	packet, _ := hex.DecodeString("000a00405685b3700000000000bc614e000200140100000300080004000c0004000200040100001cc0a800c9c0a80001000000ebc0a800cac0a800010000002a")
+	p := ipfix.NewSession()
+
+	msg, err := p.ParseBuffer(packet)
+	if err != nil {
+		t.Fatal("ParseBuffer failed", err)
+	}
+
+	if len(msg.TemplateRecords) != 1 {
+		t.Error("Incorrect number of template records", len(msg.TemplateRecords))
+	}
+	if len(msg.DataRecords) != 2 {
+		t.Error("Incorrect number of data records", len(msg.DataRecords))
+	}
+}

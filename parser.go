@@ -167,7 +167,7 @@ func (s *Session) readSet(bs []byte) ([]TemplateRecord, []DataRecord, []byte, er
 	if setLen > len(bs) {
 		return nil, nil, nil, ErrRead
 	}
-	rest := bs[setLen:]
+	bs, rest := bs[:setLen], bs[setLen:]
 
 	s.mut.RLock()
 	minLength := int(s.minRecord[setHdr.SetID])
