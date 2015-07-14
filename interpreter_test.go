@@ -103,9 +103,9 @@ func TestInterpret(t *testing.T) {
 	expected1 := InterpretedField{Name: "", FieldID: 12, EnterpriseID: 15397, RawValue: []byte{0, 0, 0, 0}}
 
 	fl := i.Interpret(msg.DataRecords[0])
-	for _, f := range fl {
-		t.Logf("%#v", f)
-	}
+	// for _, f := range fl {
+	// 	t.Logf("%#v", f)
+	// }
 	if !reflect.DeepEqual(fl[0], expected0) {
 		t.Error(fl[0], "!=\n", expected0)
 	}
@@ -114,9 +114,9 @@ func TestInterpret(t *testing.T) {
 	}
 
 	fl = i.InterpretInto(msg.DataRecords[0], make([]InterpretedField, len(fl)))
-	for _, f := range fl {
-		t.Logf("%#v", f)
-	}
+	// for _, f := range fl {
+	// 	t.Logf("%#v", f)
+	// }
 	if !reflect.DeepEqual(fl[0], expected0) {
 		t.Error(fl[0], "!=\n", expected0)
 	}
@@ -137,6 +137,7 @@ func BenchmarkInterpret(b *testing.B) {
 	if err != nil {
 		b.Fatal("ParseReader failed", err)
 	}
+	addCustomFields(i)
 
 	pb.Write(p1)
 	msg, err := p.ParseReader(pb)
@@ -168,6 +169,7 @@ func BenchmarkInterpretInto(b *testing.B) {
 	if err != nil {
 		b.Fatal("ParseReader failed", err)
 	}
+	addCustomFields(i)
 
 	pb.Write(p1)
 	msg, err := p.ParseReader(pb)
@@ -186,4 +188,43 @@ func BenchmarkInterpretInto(b *testing.B) {
 			j++
 		}
 	}
+}
+
+func addCustomFields(i *Interpreter) {
+	i.AddDictionaryEntry(DictionaryEntry{
+		Name:         "proceraService",
+		Type:         String,
+		EnterpriseID: 15397,
+		FieldID:      1,
+	})
+	i.AddDictionaryEntry(DictionaryEntry{
+		Name:         "proceraIncomingOctets",
+		Type:         Uint64,
+		EnterpriseID: 15397,
+		FieldID:      3,
+	})
+	i.AddDictionaryEntry(DictionaryEntry{
+		Name:         "proceraOutgoingOctets",
+		Type:         Uint64,
+		EnterpriseID: 15397,
+		FieldID:      4,
+	})
+	i.AddDictionaryEntry(DictionaryEntry{
+		Name:         "proceraExternalRtt",
+		Type:         Uint32,
+		EnterpriseID: 15397,
+		FieldID:      12,
+	})
+	i.AddDictionaryEntry(DictionaryEntry{
+		Name:         "proceraServerHostname",
+		Type:         String,
+		EnterpriseID: 15397,
+		FieldID:      18,
+	})
+	i.AddDictionaryEntry(DictionaryEntry{
+		Name:         "proceraSubscriberId",
+		Type:         String,
+		EnterpriseID: 15397,
+		FieldID:      28,
+	})
 }
