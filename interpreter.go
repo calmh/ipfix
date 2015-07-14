@@ -17,7 +17,7 @@ type Interpreter struct {
 	session    *Session
 }
 
-// IPFIX type of an Information Element ("Field").
+// FieldType is the IPFIX type of an Information Element ("Field").
 type FieldType int
 
 // The available field types as defined by RFC 5102.
@@ -45,6 +45,8 @@ const (
 	Ipv6Address
 )
 
+// FieldTypes maps string representations of field types into their
+// corresponding FieldType value.
 var FieldTypes = map[string]FieldType{
 	"unsigned8":            Uint8,
 	"unsigned16":           Uint16,
@@ -68,7 +70,8 @@ var FieldTypes = map[string]FieldType{
 	"ipv6Address":          Ipv6Address,
 }
 
-// DictionaryEntry provides a mapping between an (Enterprise, Field) pair and a Name and Type.
+// DictionaryEntry provides a mapping between an (Enterprise, Field) pair and
+// a Name and Type.
 type DictionaryEntry struct {
 	Name         string
 	FieldID      uint16

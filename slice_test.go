@@ -6,7 +6,7 @@ import (
 )
 
 func TestSliceCut(t *testing.T) {
-	s := NewSlice([]byte{1, 2, 3, 4, 5, 6, 7, 8})
+	s := newSlice([]byte{1, 2, 3, 4, 5, 6, 7, 8})
 	r := s.Cut(4)
 
 	if !bytes.Equal(r, []byte{1, 2, 3, 4}) {
@@ -19,7 +19,7 @@ func TestSliceCut(t *testing.T) {
 }
 
 func TestSliceUint16(t *testing.T) {
-	s := NewSlice([]byte{1, 2, 3, 4, 5})
+	s := newSlice([]byte{1, 2, 3, 4, 5})
 
 	if v := s.Uint16(); v != 1<<8+2 {
 		t.Errorf("%v != 1<<8+2", v)

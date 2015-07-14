@@ -7,7 +7,7 @@ type slice struct {
 	err error
 }
 
-func NewSlice(bs []byte) *slice {
+func newSlice(bs []byte) *slice {
 	return &slice{
 		bs: bs,
 	}

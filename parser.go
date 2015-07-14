@@ -128,7 +128,7 @@ func (s *Session) ParseReader(r io.Reader) (Message, error) {
 		return Message{}, err
 	}
 
-	sl := NewSlice(bs[msgHeaderLength:])
+	sl := newSlice(bs[msgHeaderLength:])
 	var msg Message
 	msg.Header = hdr
 	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl)
@@ -142,7 +142,7 @@ func (s *Session) ParseBuffer(bs []byte) (Message, error) {
 	var msg Message
 	var err error
 
-	sl := NewSlice(bs)
+	sl := newSlice(bs)
 	msg.Header.unmarshal(sl)
 	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl)
 	return msg, err
@@ -160,7 +160,7 @@ func (s *Session) readBuffer(sl *slice) ([]TemplateRecord, []DataRecord, error) 
 
 		// Grab the bytes representing the set
 		setLen := int(setHdr.Length) - setHeaderLength
-		setSl := NewSlice(sl.Cut(setLen))
+		setSl := newSlice(sl.Cut(setLen))
 		if err := sl.Error(); err != nil {
 			return nil, nil, err
 		}
@@ -207,8 +207,7 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 
 		case setHdr.SetID == 2:
 			// Template Set
-			var tr TemplateRecord
-			tr = s.readTemplateRecord(sl)
+			tr := s.readTemplateRecord(sl)
 			trecs = append(trecs, tr)
 
 			s.registerTemplateRecord(tr)
@@ -230,9 +229,7 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 
 			if tpl != nil {
 				// Data set
-				var ds DataRecord
-				var err error
-				ds, err = s.readDataRecord(sl, tpl)
+				ds, err := s.readDataRecord(sl, tpl)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -251,8 +248,8 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 }
 
 func (s *Session) readDataRecord(sl *slice, tpl []TemplateFieldSpecifier) (DataRecord, error) {
-	var ds DataRecord
-	ds.Fields = make([][]byte, len(tpl))
+	var dr DataRecord
+	dr.Fields = make([][]byte, len(tpl))
 
 	var err error
 	total := 0
@@ -267,7 +264,7 @@ func (s *Session) readDataRecord(sl *slice, tpl []TemplateFieldSpecifier) (DataR
 			l := int(tpl[i].Length)
 			val = sl.Cut(l)
 		}
-		ds.Fields[i] = val
+		dr.Fields[i] = val
 		total += len(val)
 	}
 
@@ -278,13 +275,13 @@ func (s *Session) readDataRecord(sl *slice, tpl []TemplateFieldSpecifier) (DataR
 
 	cp := make([]byte, total)
 	next := 0
-	for i := range ds.Fields {
-		ln := copy(cp[next:], ds.Fields[i])
-		ds.Fields[i] = cp[next : next+ln]
+	for i := range dr.Fields {
+		ln := copy(cp[next:], dr.Fields[i])
+		dr.Fields[i] = cp[next : next+ln]
 		next += ln
 	}
 
-	return ds, sl.Error()
+	return dr, sl.Error()
 }
 
 func (s *Session) readTemplateRecord(sl *slice) TemplateRecord {
@@ -316,10 +313,6 @@ func (s *Session) readVariableLength(sl *slice) (val []byte, err error) {
 		l = int(l0)
 	} else {
 		l = int(sl.Uint16())
-	}
-
-	if l > sl.Len() {
-		return nil, io.EOF
 	}
 
 	return sl.Cut(l), sl.Error()
