@@ -178,10 +178,19 @@ func interpretBytes(bs []byte, t FieldType) interface{} {
 	case Uint8:
 		return bs[0]
 	case Uint16:
+		if len(bs) != 2 {
+			return 0
+		}
 		return binary.BigEndian.Uint16(bs)
 	case Uint32:
+		if len(bs) != 4 {
+			return 0
+		}
 		return binary.BigEndian.Uint32(bs)
 	case Uint64:
+		if len(bs) != 8 {
+			return 0
+		}
 		return binary.BigEndian.Uint64(bs)
 	case Int8:
 		return int8(bs[0])
