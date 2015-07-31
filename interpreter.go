@@ -185,44 +185,44 @@ func interpretBytes(bs []byte, t FieldType) (interface{}, error) {
 		return bs[0], nil
 	case Uint16:
 		if len(bs) != 2 {
-			return 0, errors.New("16 bytes needed for Uint16 type")
+			return uint16(0), errors.New("16 bytes needed for Uint16 type")
 		}
 		return binary.BigEndian.Uint16(bs), nil
 	case Uint32:
 		if len(bs) != 4 {
-			return 0, errors.New("32 bytes needed for Uint32 type")
+			return uint32(0), errors.New("32 bytes needed for Uint32 type")
 		}
 		return binary.BigEndian.Uint32(bs), nil
 	case Uint64:
 		if len(bs) != 8 {
-			return 0, errors.New("64 bytes needed for Uint64 type")
+			return uint64(0), errors.New("64 bytes needed for Uint64 type")
 		}
 		return binary.BigEndian.Uint64(bs), nil
 	case Int8:
 		return int8(bs[0]), nil
 	case Int16:
 		if len(bs) != 2 {
-			return 0, errors.New("16 bytes needed for Int16 type")
+			return int16(0), errors.New("16 bytes needed for Int16 type")
 		}
 		return int16(binary.BigEndian.Uint16(bs)), nil
 	case Int32:
 		if len(bs) != 4 {
-			return 0, errors.New("32 bytes needed for Int32 type")
+			return int32(0), errors.New("32 bytes needed for Int32 type")
 		}
 		return int32(binary.BigEndian.Uint32(bs)), nil
 	case Int64:
 		if len(bs) != 8 {
-			return 0, errors.New("64 bytes needed for Int64 type")
+			return int64(0), errors.New("64 bytes needed for Int64 type")
 		}
 		return int64(binary.BigEndian.Uint64(bs)), nil
 	case Float32:
 		if len(bs) != 4 {
-			return 0, errors.New("32 bytes needed for Float32 type")
+			return float32(0), errors.New("32 bytes needed for Float32 type")
 		}
 		return math.Float32frombits(binary.BigEndian.Uint32(bs)), nil
 	case Float64:
 		if len(bs) != 4 {
-			return 0, errors.New("64 bytes needed for Float64 type")
+			return float64(0), errors.New("64 bytes needed for Float64 type")
 		}
 		return math.Float64frombits(binary.BigEndian.Uint64(bs)), nil
 	case Boolean:
@@ -241,24 +241,24 @@ func interpretBytes(bs []byte, t FieldType) (interface{}, error) {
 		return net.IP(bs), nil
 	case DateTimeSeconds:
 		if len(bs) != 4 {
-			return 0, errors.New("32 bytes needed for DateTimeSeconds type")
+			return time.Unix(0, 0), errors.New("32 bytes needed for DateTimeSeconds type")
 		}
 		return time.Unix(int64(binary.BigEndian.Uint32(bs)), 0), nil
 	case DateTimeMilliseconds:
 		if len(bs) != 8 {
-			return 0, errors.New("64 bytes needed for DateTimeMilliseconds type")
+			return int64(0), errors.New("64 bytes needed for DateTimeMilliseconds type")
 		}
 		unixTimeMs := int64(binary.BigEndian.Uint64(bs))
 		return time.Unix(0, 0).Add(time.Duration(unixTimeMs) * time.Millisecond), nil
 	case DateTimeMicroseconds:
 		if len(bs) != 8 {
-			return 0, errors.New("64 bytes needed for DateTimeMicroseconds type")
+			return time.Unix(0, 0), errors.New("64 bytes needed for DateTimeMicroseconds type")
 		}
 		unixTimeUs := int64(binary.BigEndian.Uint64(bs))
 		return time.Unix(0, 0).Add(time.Duration(unixTimeUs) * time.Microsecond), nil
 	case DateTimeNanoseconds:
 		if len(bs) != 8 {
-			return 0, errors.New("64 bytes needed for DateTimeNanoseconds type")
+			return time.Unix(0, 0), errors.New("64 bytes needed for DateTimeNanoseconds type")
 		}
 		unixTimeNs := int64(binary.BigEndian.Uint64(bs))
 		return time.Unix(0, 0).Add(time.Duration(unixTimeNs)), nil
