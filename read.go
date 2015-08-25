@@ -28,6 +28,11 @@ func Read(r io.Reader, bs []byte) ([]byte, MessageHeader, error) {
 		bs = newBs
 	}
 
+	if hdr.Length < msgHeaderLength {
+		// Message can't be shorter than its header
+		return nil, hdr, io.ErrUnexpectedEOF
+	}
+
 	bs = bs[:int(hdr.Length)]
 	_, err = io.ReadFull(r, bs[msgHeaderLength:])
 	if err != nil {

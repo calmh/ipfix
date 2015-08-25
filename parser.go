@@ -158,6 +158,11 @@ func (s *Session) readBuffer(sl *slice) ([]TemplateRecord, []DataRecord, error) 
 		var setHdr setHeader
 		setHdr.unmarshal(sl)
 
+		if setHdr.Length < setHeaderLength {
+			// Set cannot be shorter than its header
+			return nil, nil, io.ErrUnexpectedEOF
+		}
+
 		// Grab the bytes representing the set
 		setLen := int(setHdr.Length) - setHeaderLength
 		setSl := newSlice(sl.Cut(setLen))
