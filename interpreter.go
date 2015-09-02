@@ -3,6 +3,7 @@ package ipfix
 import (
 	"crypto/md5"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -138,9 +139,14 @@ func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField
 		fieldList[j].FieldID = field.FieldID
 		fieldList[j].EnterpriseID = field.EnterpriseID
 
+		var err error
 		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseID, field.FieldID}]; ok {
 			fieldList[j].Name = entry.Name
-			fieldList[j].Value = interpretBytes(rec.Fields[j], entry.Type)
+			fieldList[j].Value, err = interpretBytes(rec.Fields[j], entry.Type)
+			//default to raw if there was an error with the interpretBytes method
+			if err != nil {
+				fieldList[j].RawValue = rec.Fields[j]
+			}
 		} else {
 			fieldList[j].RawValue = rec.Fields[j]
 		}
@@ -173,53 +179,89 @@ func (i *Interpreter) AddDictionaryEntry(e DictionaryEntry) {
 
 var md5HashSalt = []byte(os.Getenv("IPFIX_IP_HASH"))
 
-func interpretBytes(bs []byte, t FieldType) interface{} {
+func interpretBytes(bs []byte, t FieldType) (interface{}, error) {
 	switch t {
 	case Uint8:
-		return bs[0]
+		return bs[0], nil
 	case Uint16:
-		return binary.BigEndian.Uint16(bs)
+		if len(bs) != 2 {
+			return uint16(0), errors.New("16 bytes needed for Uint16 type")
+		}
+		return binary.BigEndian.Uint16(bs), nil
 	case Uint32:
-		return binary.BigEndian.Uint32(bs)
+		if len(bs) != 4 {
+			return uint32(0), errors.New("32 bytes needed for Uint32 type")
+		}
+		return binary.BigEndian.Uint32(bs), nil
 	case Uint64:
-		return binary.BigEndian.Uint64(bs)
+		if len(bs) != 8 {
+			return uint64(0), errors.New("64 bytes needed for Uint64 type")
+		}
+		return binary.BigEndian.Uint64(bs), nil
 	case Int8:
-		return int8(bs[0])
+		return int8(bs[0]), nil
 	case Int16:
-		return int16(binary.BigEndian.Uint16(bs))
+		if len(bs) != 2 {
+			return int16(0), errors.New("16 bytes needed for Int16 type")
+		}
+		return int16(binary.BigEndian.Uint16(bs)), nil
 	case Int32:
-		return int32(binary.BigEndian.Uint32(bs))
+		if len(bs) != 4 {
+			return int32(0), errors.New("32 bytes needed for Int32 type")
+		}
+		return int32(binary.BigEndian.Uint32(bs)), nil
 	case Int64:
-		return int64(binary.BigEndian.Uint64(bs))
+		if len(bs) != 8 {
+			return int64(0), errors.New("64 bytes needed for Int64 type")
+		}
+		return int64(binary.BigEndian.Uint64(bs)), nil
 	case Float32:
-		return math.Float32frombits(binary.BigEndian.Uint32(bs))
+		if len(bs) != 4 {
+			return float32(0), errors.New("32 bytes needed for Float32 type")
+		}
+		return math.Float32frombits(binary.BigEndian.Uint32(bs)), nil
 	case Float64:
-		return math.Float64frombits(binary.BigEndian.Uint64(bs))
+		if len(bs) != 4 {
+			return float64(0), errors.New("64 bytes needed for Float64 type")
+		}
+		return math.Float64frombits(binary.BigEndian.Uint64(bs)), nil
 	case Boolean:
-		return bs[0] == 1
+		return bs[0] == 1, nil
 	case Unknown, MacAddress, OctetArray:
-		return bs
+		return bs, nil
 	case String:
-		return string(bs)
+		return string(bs), nil
 	case Ipv4Address, Ipv6Address:
 		if len(md5HashSalt) > 0 {
 			h := md5.New()
 			h.Write(md5HashSalt)
 			h.Write(bs)
-			return fmt.Sprintf("%x", h.Sum(nil))
+			return fmt.Sprintf("%x", h.Sum(nil)), nil
 		}
-		return net.IP(bs)
+		return net.IP(bs), nil
 	case DateTimeSeconds:
-		return time.Unix(int64(binary.BigEndian.Uint32(bs)), 0)
+		if len(bs) != 4 {
+			return time.Unix(0, 0), errors.New("32 bytes needed for DateTimeSeconds type")
+		}
+		return time.Unix(int64(binary.BigEndian.Uint32(bs)), 0), nil
 	case DateTimeMilliseconds:
+		if len(bs) != 8 {
+			return int64(0), errors.New("64 bytes needed for DateTimeMilliseconds type")
+		}
 		unixTimeMs := int64(binary.BigEndian.Uint64(bs))
-		return time.Unix(0, 0).Add(time.Duration(unixTimeMs) * time.Millisecond)
+		return time.Unix(0, 0).Add(time.Duration(unixTimeMs) * time.Millisecond), nil
 	case DateTimeMicroseconds:
+		if len(bs) != 8 {
+			return time.Unix(0, 0), errors.New("64 bytes needed for DateTimeMicroseconds type")
+		}
 		unixTimeUs := int64(binary.BigEndian.Uint64(bs))
-		return time.Unix(0, 0).Add(time.Duration(unixTimeUs) * time.Microsecond)
+		return time.Unix(0, 0).Add(time.Duration(unixTimeUs) * time.Microsecond), nil
 	case DateTimeNanoseconds:
+		if len(bs) != 8 {
+			return time.Unix(0, 0), errors.New("64 bytes needed for DateTimeNanoseconds type")
+		}
 		unixTimeNs := int64(binary.BigEndian.Uint64(bs))
-		return time.Unix(0, 0).Add(time.Duration(unixTimeNs))
+		return time.Unix(0, 0).Add(time.Duration(unixTimeNs)), nil
 	}
-	return bs
+	return bs, nil
 }

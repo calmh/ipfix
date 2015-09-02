@@ -17,6 +17,9 @@ var ErrVersion = errors.New("incorrect version field in message header - out of 
 // packet.
 var ErrRead = errors.New("short read - malformed packet?")
 
+//ErrHeader is returned when a packet has a header that isn't long enough (2 bytes)
+var ErrHeader = errors.New("packet header not long enough")
+
 // ErrProtocol is returned when impossible values that constitute a protocol
 // error are encountered.
 var ErrProtocol = errors.New("protocol error")
@@ -172,6 +175,9 @@ func (s *Session) readBuffer(sl *slice) ([]TemplateRecord, []DataRecord, error) 
 
 		// Grab the bytes representing the set
 		setLen := int(setHdr.Length) - setHeaderLength
+		if setLen < 0 {
+			return nil, nil, ErrHeader
+		}
 		setSl := newSlice(sl.Cut(setLen))
 		if err := sl.Error(); err != nil {
 			if debug {
