@@ -70,6 +70,28 @@ var FieldTypes = map[string]FieldType{
 	"ipv6Address":          Ipv6Address,
 }
 
+// minLength is the minimum length of a field of the given type, in bytes.
+func (t FieldType) minLength() int {
+	switch t {
+	case Uint8, Int8, Boolean:
+		return 1
+	case Uint16, Int16:
+		return 2
+	case Uint32, Int32, Float32, DateTimeSeconds:
+		return 4
+	case Uint64, Int64, Float64, DateTimeMilliseconds, DateTimeMicroseconds, DateTimeNanoseconds:
+		return 8
+	case MacAddress:
+		return 6
+	case Ipv4Address:
+		return 4
+	case Ipv6Address:
+		return 16
+	default:
+		return 0
+	}
+}
+
 // DictionaryEntry provides a mapping between an (Enterprise, Field) pair and
 // a Name and Type.
 type DictionaryEntry struct {
@@ -174,6 +196,11 @@ func (i *Interpreter) AddDictionaryEntry(e DictionaryEntry) {
 var md5HashSalt = []byte(os.Getenv("IPFIX_IP_HASH"))
 
 func interpretBytes(bs []byte, t FieldType) interface{} {
+	if len(bs) < t.minLength() {
+		// Field is too short (corrupt) - return it uninterpreted.
+		return bs
+	}
+
 	switch t {
 	case Uint8:
 		return bs[0]
