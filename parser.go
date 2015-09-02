@@ -158,8 +158,15 @@ func (s *Session) readBuffer(sl *slice) ([]TemplateRecord, []DataRecord, error) 
 		var setHdr setHeader
 		setHdr.unmarshal(sl)
 
+		if debug {
+			dl.Printf("setHdr: %+v", setHdr)
+		}
+
 		if setHdr.Length < setHeaderLength {
 			// Set cannot be shorter than its header
+			if debug {
+				dl.Println("setHdr too short")
+			}
 			return nil, nil, io.ErrUnexpectedEOF
 		}
 
@@ -167,12 +174,18 @@ func (s *Session) readBuffer(sl *slice) ([]TemplateRecord, []DataRecord, error) 
 		setLen := int(setHdr.Length) - setHeaderLength
 		setSl := newSlice(sl.Cut(setLen))
 		if err := sl.Error(); err != nil {
+			if debug {
+				dl.Println("slice error")
+			}
 			return nil, nil, err
 		}
 
 		// Parse them
 		ts, ds, err = s.readSet(setHdr, setSl)
 		if err != nil {
+			if debug {
+				dl.Println("readSet:", err)
+			}
 			return nil, nil, err
 		}
 
@@ -193,6 +206,9 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 
 	for sl.Len() > 0 {
 		if sl.Len() < minLength {
+			if debug {
+				dl.Println("ignoring padding")
+			}
 			// Padding
 			return trecs, drecs, sl.Error()
 		}
@@ -208,25 +224,43 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 		switch {
 		case setHdr.SetID < 2:
 			// Unused, shouldn't happen
+			if debug {
+				dl.Println("bad SetID", setHdr.SetID)
+			}
 			return nil, nil, ErrProtocol
 
 		case setHdr.SetID == 2:
 			// Template Set
+			if debug {
+				dl.Println("parsing template set")
+			}
 			tr := s.readTemplateRecord(sl)
 			trecs = append(trecs, tr)
 
 			s.registerTemplateRecord(tr)
+			if debug {
+				dl.Printf("registered template: %+v", tr)
+			}
 
 		case setHdr.SetID == 3:
 			// Options Template Set, not handled
+			if debug {
+				dl.Println("skipping option template set")
+			}
 			sl.Cut(sl.Len())
 
 		case setHdr.SetID > 3 && setHdr.SetID < 256:
 			// Reserved, shouldn't happen
+			if debug {
+				dl.Println("bad SetID", setHdr.SetID)
+			}
 			return nil, nil, ErrProtocol
 
 		default:
 			// Data set
+			if debug {
+				dl.Println("parsing data set")
+			}
 
 			s.mut.RLock()
 			tpl := s.templates[setHdr.SetID]
@@ -292,6 +326,9 @@ func (s *Session) readDataRecord(sl *slice, tpl []TemplateFieldSpecifier) (DataR
 func (s *Session) readTemplateRecord(sl *slice) TemplateRecord {
 	var th templateHeader
 	th.unmarshal(sl)
+	if debug {
+		dl.Printf("templateHeader: %+v", th)
+	}
 
 	var tr TemplateRecord
 	tr.TemplateID = th.TemplateID
