@@ -204,7 +204,7 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 	minLength := int(s.minRecord[setHdr.SetID])
 	s.mut.RUnlock()
 
-	for sl.Len() > 0 {
+	for sl.Len() > 0 && sl.Error() == nil {
 		if sl.Len() < minLength {
 			if debug {
 				dl.Println("ignoring padding")
