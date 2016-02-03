@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"code.google.com/p/gcfg"
+	"gopkg.in/gcfg.v1"
 )
 
 var extra []DictionaryEntry
