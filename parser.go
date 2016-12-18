@@ -23,6 +23,8 @@ var ErrProtocol = errors.New("protocol error")
 
 // A Message is the top level construct representing an IPFIX message. A well
 // formed message contains one or more sets of data or template information.
+// The array "DataRecords" stores the actual IPFIX data while "TemplateRecords"
+// stores the corresponding template at the same index.
 type Message struct {
 	Header          MessageHeader
 	DataRecords     []DataRecord
