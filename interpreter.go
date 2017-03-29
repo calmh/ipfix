@@ -162,7 +162,7 @@ func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField
 
 		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseID, field.FieldID}]; ok {
 			fieldList[j].Name = entry.Name
-			fieldList[j].Value = interpretBytes(rec.Fields[j], entry.Type)
+			fieldList[j].Value = interpretBytes(&rec.Fields[j], entry.Type)
 		} else {
 			fieldList[j].RawValue = rec.Fields[j]
 		}
@@ -195,58 +195,58 @@ func (i *Interpreter) AddDictionaryEntry(e DictionaryEntry) {
 
 var md5HashSalt = []byte(os.Getenv("IPFIX_IP_HASH"))
 
-func interpretBytes(bs []byte, t FieldType) interface{} {
-	if len(bs) < t.minLength() {
+func interpretBytes(bs *[]byte, t FieldType) interface{} {
+	if len(*bs) < t.minLength() {
 		// Field is too short (corrupt) - return it uninterpreted.
-		return bs
+		return *bs
 	}
 
 	switch t {
-	case Uint8:
-		return bs[0]
-	case Uint16:
-		return binary.BigEndian.Uint16(bs)
-	case Uint32:
-		return binary.BigEndian.Uint32(bs)
-	case Uint64:
-		return binary.BigEndian.Uint64(bs)
-	case Int8:
-		return int8(bs[0])
-	case Int16:
-		return int16(binary.BigEndian.Uint16(bs))
-	case Int32:
-		return int32(binary.BigEndian.Uint32(bs))
-	case Int64:
-		return int64(binary.BigEndian.Uint64(bs))
-	case Float32:
-		return math.Float32frombits(binary.BigEndian.Uint32(bs))
-	case Float64:
-		return math.Float64frombits(binary.BigEndian.Uint64(bs))
-	case Boolean:
-		return bs[0] == 1
-	case Unknown, MacAddress, OctetArray:
-		return bs
-	case String:
-		return string(bs)
 	case Ipv4Address, Ipv6Address:
 		if len(md5HashSalt) > 0 {
 			h := md5.New()
 			h.Write(md5HashSalt)
-			h.Write(bs)
+			h.Write(*bs)
 			return fmt.Sprintf("%x", h.Sum(nil))
 		}
-		return net.IP(bs)
+		return (*net.IP)(bs)
+	case Uint8:
+		return (*bs)[0]
+	case Uint16:
+		return binary.BigEndian.Uint16(*bs)
+	case Uint32:
+		return binary.BigEndian.Uint32(*bs)
+	case Uint64:
+		return binary.BigEndian.Uint64(*bs)
+	case Int8:
+		return int8((*bs)[0])
+	case Int16:
+		return int16(binary.BigEndian.Uint16(*bs))
+	case Int32:
+		return int32(binary.BigEndian.Uint32(*bs))
+	case Int64:
+		return int64(binary.BigEndian.Uint64(*bs))
+	case Float32:
+		return math.Float32frombits(binary.BigEndian.Uint32(*bs))
+	case Float64:
+		return math.Float64frombits(binary.BigEndian.Uint64(*bs))
+	case Boolean:
+		return (*bs)[0] == 1
+	case Unknown, MacAddress, OctetArray:
+		return *bs
+	case String:
+		return string(*bs)
 	case DateTimeSeconds:
-		return time.Unix(int64(binary.BigEndian.Uint32(bs)), 0)
+		return time.Unix(int64(binary.BigEndian.Uint32(*bs)), 0)
 	case DateTimeMilliseconds:
-		unixTimeMs := int64(binary.BigEndian.Uint64(bs))
+		unixTimeMs := int64(binary.BigEndian.Uint64(*bs))
 		return time.Unix(0, 0).Add(time.Duration(unixTimeMs) * time.Millisecond)
 	case DateTimeMicroseconds:
-		unixTimeUs := int64(binary.BigEndian.Uint64(bs))
+		unixTimeUs := int64(binary.BigEndian.Uint64(*bs))
 		return time.Unix(0, 0).Add(time.Duration(unixTimeUs) * time.Microsecond)
 	case DateTimeNanoseconds:
-		unixTimeNs := int64(binary.BigEndian.Uint64(bs))
+		unixTimeNs := int64(binary.BigEndian.Uint64(*bs))
 		return time.Unix(0, 0).Add(time.Duration(unixTimeNs))
 	}
-	return bs
+	return *bs
 }
