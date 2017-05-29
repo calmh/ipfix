@@ -99,24 +99,18 @@ func TestInterpret(t *testing.T) {
 
 	i := NewInterpreter(p)
 
-	expected0 := InterpretedField{Name: "destinationIPv4Address", FieldID: 12, EnterpriseID: 0, Value: net.IP{172, 16, 32, 15}}
+	expected0 := InterpretedField{Name: "destinationIPv4Address", FieldID: 12, EnterpriseID: 0, Value: &net.IP{172, 16, 32, 15}}
 	expected1 := InterpretedField{Name: "", FieldID: 12, EnterpriseID: 15397, RawValue: []byte{0, 0, 0, 0}}
 
 	fl := i.Interpret(msg.DataRecords[0])
-	// for _, f := range fl {
-	// 	t.Logf("%#v", f)
-	// }
 	if !reflect.DeepEqual(fl[0], expected0) {
-		t.Error(fl[0], "!=\n", expected0)
+		t.Error(fl[1], "!=\n", expected1)
 	}
 	if !reflect.DeepEqual(fl[1], expected1) {
 		t.Error(fl[1], "!=\n", expected1)
 	}
 
 	fl = i.InterpretInto(msg.DataRecords[0], make([]InterpretedField, len(fl)))
-	// for _, f := range fl {
-	// 	t.Logf("%#v", f)
-	// }
 	if !reflect.DeepEqual(fl[0], expected0) {
 		t.Error(fl[0], "!=\n", expected0)
 	}
