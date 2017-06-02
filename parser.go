@@ -121,6 +121,8 @@ const (
 // as err is nil, further messages can be read from the stream. Errors are not
 // recoverable -- once an error has been returned, ParseReader should not be
 // called again on the same session.
+//
+// Deprecated: use ParseBuffer instead.
 func (s *Session) ParseReader(r io.Reader) (Message, error) {
 	bs := s.buffers.Get().([]byte)
 	bs, hdr, err := Read(r, bs)
