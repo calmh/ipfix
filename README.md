@@ -3,7 +3,6 @@ ipfix
 
 Package ipfix implements an IPFIX (RFC 5101) parser and interpreter.
 
-[![Build Status](https://img.shields.io/circleci/project/calmh/ipfix.svg?style=flat-square)](https://circleci.com/gh/calmh/ipfix)
 [![API Documentation](http://img.shields.io/badge/api-Godoc-blue.svg?style=flat-square)](http://godoc.org/github.com/calmh/ipfix)
 [![MIT License](http://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](http://opensource.org/licenses/MIT)
 
