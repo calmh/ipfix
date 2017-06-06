@@ -44,7 +44,12 @@ To add a vendor field to the dictionary so that it will be resolved by
 Interpret, create a DictionaryEntry and call AddDictionaryEntry.
 
 ```go
-e := ipfix.DictionaryEntry{Name: "someVendorField", FieldId: 42, EnterpriseId: 123456, Type: ipfix.Int32}
+e := ipfix.DictionaryEntry{
+    Name: "someVendorField",
+    FieldId: 42,
+    EnterpriseId: 123456,
+    Type: ipfix.Int32
+}
 i.AddDictionaryEntry(e)
 ```
 
