@@ -73,13 +73,11 @@ var FieldTypes = map[string]FieldType{
 // minLength is the minimum length of a field of the given type, in bytes.
 func (t FieldType) minLength() int {
 	switch t {
-	case Uint8, Int8, Boolean:
-		return 1
-	case Uint16, Int16:
-		return 2
-	case Uint32, Int32, Float32, DateTimeSeconds:
+	case Uint8, Int8, Boolean, Uint16, Int16, Uint32, Int32, Uint64, Int64:
+		return 1 // all integers can be reduced-size encoded
+	case Float32, DateTimeSeconds:
 		return 4
-	case Uint64, Int64, Float64, DateTimeMilliseconds, DateTimeMicroseconds, DateTimeNanoseconds:
+	case Float64, DateTimeMilliseconds, DateTimeMicroseconds, DateTimeNanoseconds:
 		return 8
 	case MacAddress:
 		return 6
@@ -213,21 +211,21 @@ func interpretBytes(bs *[]byte, t FieldType) interface{} {
 		}
 		return (*net.IP)(bs)
 	case Uint8:
-		return (*bs)[0]
+		return uint8(number(*bs))
 	case Uint16:
-		return binary.BigEndian.Uint16(*bs)
+		return uint16(number(*bs))
 	case Uint32:
-		return binary.BigEndian.Uint32(*bs)
+		return uint32(number(*bs))
 	case Uint64:
-		return binary.BigEndian.Uint64(*bs)
+		return uint64(number(*bs))
 	case Int8:
-		return int8((*bs)[0])
+		return int8(number(*bs))
 	case Int16:
-		return int16(binary.BigEndian.Uint16(*bs))
+		return int16(number(*bs))
 	case Int32:
-		return int32(binary.BigEndian.Uint32(*bs))
+		return int32(number(*bs))
 	case Int64:
-		return int64(binary.BigEndian.Uint64(*bs))
+		return int64(number(*bs))
 	case Float32:
 		return math.Float32frombits(binary.BigEndian.Uint32(*bs))
 	case Float64:
@@ -251,4 +249,19 @@ func interpretBytes(bs *[]byte, t FieldType) interface{} {
 		return time.Unix(0, 0).Add(time.Duration(unixTimeNs))
 	}
 	return *bs
+}
+
+func number(bs []byte) uint64 {
+	switch len(bs) {
+	case 1:
+		return uint64(bs[0])
+	case 2:
+		return uint64(binary.BigEndian.Uint16(bs))
+	case 4:
+		return uint64(binary.BigEndian.Uint32(bs))
+	case 8:
+		return uint64(binary.BigEndian.Uint64(bs))
+	default:
+		return 0
+	}
 }
