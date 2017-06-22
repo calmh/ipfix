@@ -1,7 +1,10 @@
 package ipfix
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"io"
 	"sync"
 )
@@ -94,9 +97,11 @@ type TemplateFieldSpecifier struct {
 type Session struct {
 	buffers *sync.Pool
 
-	mut       sync.RWMutex
-	templates [][]TemplateFieldSpecifier
-	minRecord []uint16
+	mut                  sync.RWMutex
+	templates            [][]TemplateFieldSpecifier
+	minRecord            []uint16
+	templateIdMap        map[uint16]uint16
+	templateSignatureMap map[uint32]uint16
 }
 
 // NewSession initializes a new Session based on the provided io.Reader.
@@ -109,6 +114,9 @@ func NewSession() *Session {
 			return make([]byte, 65536)
 		},
 	}
+	s.templateIdMap = make(map[uint16]uint16)
+	s.templateSignatureMap = make(map[uint32]uint16)
+
 	return &s
 }
 
@@ -116,6 +124,8 @@ const (
 	msgHeaderLength = 2 + 2 + 4 + 4 + 4
 	setHeaderLength = 2 + 2
 )
+
+var crc32Table = crc32.MakeTable(crc32.IEEE)
 
 // ParseReader extracts and returns one message from the IPFIX stream. As long
 // as err is nil, further messages can be read from the stream. Errors are not
@@ -333,7 +343,6 @@ func (s *Session) readTemplateRecord(sl *slice) TemplateRecord {
 	}
 
 	var tr TemplateRecord
-	tr.TemplateID = th.TemplateID
 	tr.FieldSpecifiers = make([]TemplateFieldSpecifier, th.FieldCount)
 	for i := 0; i < int(th.FieldCount); i++ {
 		f := TemplateFieldSpecifier{}
@@ -346,7 +355,32 @@ func (s *Session) readTemplateRecord(sl *slice) TemplateRecord {
 		tr.FieldSpecifiers[i] = f
 	}
 
+	tr.TemplateID = s.unaliasTemplateId(th.TemplateID, tr.FieldSpecifiers)
+
 	return tr
+}
+
+func (s *Session) unaliasTemplateId(templateId uint16, fieldSpecifiers []TemplateFieldSpecifier) uint16 {
+
+	s.mut.Lock()
+	defer s.mut.Unlock()
+
+	if id, ok := s.templateIdMap[templateId]; ok {
+		return id
+	}
+
+	var buffer bytes.Buffer
+	binary.Write(&buffer, binary.BigEndian, fieldSpecifiers)
+	hash := crc32.Checksum(buffer.Bytes(), crc32Table)
+
+	if id, ok := s.templateSignatureMap[hash]; ok {
+		s.templateIdMap[templateId] = id
+		return id
+	} else {
+		s.templateSignatureMap[hash] = templateId
+		s.templateIdMap[templateId] = templateId
+		return templateId
+	}
 }
 
 func (s *Session) readVariableLength(sl *slice) (val []byte, err error) {
