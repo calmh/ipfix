@@ -97,10 +97,10 @@ type TemplateFieldSpecifier struct {
 // An option can be passed to New()
 type Option func(*Session)
 
-// WithTemplateIDAliasing enables or disables template id aliasing. The default is disabled.
-func WithTemplateIDAliasing(v bool) Option {
+// WithIDAliasing enables or disables template id aliasing. The default is disabled.
+func WithIDAliasing(v bool) Option {
 	return func(s *Session) {
-		s.withTemplateIDAliasing = v
+		s.withIDAliasing = v
 	}
 }
 
@@ -108,14 +108,14 @@ func WithTemplateIDAliasing(v bool) Option {
 type Session struct {
 	buffers *sync.Pool
 
-	mut sync.RWMutex
+	withIDAliasing bool
 
-	withTemplateIDAliasing bool
-	minRecord              map[uint16]uint16
-	signatures             map[string]uint16
-	specifiers             map[uint16][]TemplateFieldSpecifier
-	aliases                map[uint16]uint16
-	nextID                 uint16
+	mut        sync.RWMutex
+	minRecord  map[uint16]uint16
+	signatures map[string]uint16
+	specifiers map[uint16][]TemplateFieldSpecifier
+	aliases    map[uint16]uint16
+	nextID     uint16
 }
 
 // NewSession initializes a new Session based on the provided io.Reader.
@@ -131,7 +131,7 @@ func NewSession(opts ...Option) *Session {
 		opt(&s)
 	}
 
-	if s.withTemplateIDAliasing {
+	if s.withIDAliasing {
 		s.signatures = make(map[string]uint16)
 		s.aliases = make(map[uint16]uint16)
 		s.nextID = 256
@@ -234,10 +234,10 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 	var trecs []TemplateRecord
 	var drecs []DataRecord
 
-	minLength := int(s.getMinRecordLength(setHdr.SetID))
+	minLen := int(s.getMinRecLen(setHdr.SetID))
 
 	for sl.Len() > 0 && sl.Error() == nil {
-		if sl.Len() < minLength {
+		if sl.Len() < minLen {
 			if debug {
 				dl.Println("ignoring padding")
 			}
@@ -311,16 +311,13 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 	return trecs, drecs, sl.Error()
 }
 
-func (s *Session) unaliasTemplateID(TemplateID uint16) uint16 {
-	var id uint16
-	if s.withTemplateIDAliasing {
+func (s *Session) unaliasTemplateID(tid uint16) uint16 {
+	if s.withIDAliasing {
 		s.mut.RLock()
-		id = s.aliases[TemplateID]
+		tid = s.aliases[tid]
 		s.mut.RUnlock()
-	} else {
-		id = TemplateID
 	}
-	return id
+	return tid
 }
 
 func (s *Session) readDataRecord(sl *slice, tpl []TemplateFieldSpecifier) (DataRecord, error) {
@@ -385,7 +382,7 @@ func (s *Session) readTemplateRecord(sl *slice) TemplateRecord {
 }
 
 func (s *Session) registerTemplateRecord(tr *TemplateRecord) {
-	if s.withTemplateIDAliasing {
+	if s.withIDAliasing {
 		tr.TemplateID = s.registerAliasedTemplateRecord(*tr)
 	} else {
 		s.registerUnaliasedTemplateRecord(*tr)
@@ -395,31 +392,30 @@ func (s *Session) registerTemplateRecord(tr *TemplateRecord) {
 func (s *Session) registerUnaliasedTemplateRecord(tr TemplateRecord) {
 	// Update templates and minimum record cache
 	tid := tr.TemplateID
-	specifiers := tr.FieldSpecifiers
-	minLength := calcMinRecLen(specifiers)
+	tpl := tr.FieldSpecifiers
+	minLen := calcMinRecLen(tpl)
 	s.mut.Lock()
-	if minLength == 0 {
+	defer s.mut.Unlock()
+	if minLen == 0 {
 		delete(s.specifiers, tid)
 	} else {
-		s.specifiers[tid] = specifiers
+		s.specifiers[tid] = tpl
 	}
-	s.minRecord[tid] = minLength
-	s.mut.Unlock()
+	s.minRecord[tid] = minLen
 }
 
 func (s *Session) registerAliasedTemplateRecord(tr TemplateRecord) uint16 {
-
-	var TemplateID uint16
+	var tid uint16
 	if len(tr.FieldSpecifiers) == 0 {
-		TemplateID = s.withdrawTemplateRecord(tr)
+		tid = s.withdrawAliasedTemplateRecord(tr)
 	} else {
-		TemplateID = s.aliasTemplateRecord(tr)
+		tid = s.aliasTemplateRecord(tr)
 	}
 
 	if debug {
-		dl.Printf("Mapped template id %d -> %d", tr.TemplateID, TemplateID)
+		dl.Printf("Mapped template id %d -> %d", tr.TemplateID, tid)
 	}
-	return TemplateID
+	return tid
 }
 
 func (s *Session) aliasTemplateRecord(tr TemplateRecord) uint16 {
@@ -427,94 +423,95 @@ func (s *Session) aliasTemplateRecord(tr TemplateRecord) uint16 {
 	binary.Write(&buffer, binary.BigEndian, tr.FieldSpecifiers)
 	hash := fmt.Sprintf("%x", sha1.Sum(buffer.Bytes()))
 
-	var NewTemplateID uint16
+	var ntid uint16
 	s.mut.Lock()
+	defer s.mut.Unlock()
+
 	if id, ok := s.signatures[hash]; ok {
-		NewTemplateID = id
+		ntid = id
 	} else {
-		NewTemplateID = s.nextID
-		s.signatures[hash] = NewTemplateID
-		s.specifiers[NewTemplateID] = tr.FieldSpecifiers
+		ntid = s.nextID
+		s.signatures[hash] = ntid
+		s.specifiers[ntid] = tr.FieldSpecifiers
 		s.nextID++
 
-		s.minRecord[NewTemplateID] = calcMinRecLen(tr.FieldSpecifiers)
+		s.minRecord[ntid] = calcMinRecLen(tr.FieldSpecifiers)
 	}
 
 	if _, ok := s.aliases[tr.TemplateID]; !ok {
-		s.aliases[tr.TemplateID] = NewTemplateID
+		s.aliases[tr.TemplateID] = ntid
 	}
-	s.mut.Unlock()
 
-	return NewTemplateID
+	return ntid
 }
 
-func (s *Session) withdrawTemplateRecord(tr TemplateRecord) uint16 {
+func (s *Session) withdrawAliasedTemplateRecord(tr TemplateRecord) uint16 {
 	s.mut.Lock()
+	defer s.mut.Unlock()
 	delete(s.aliases, tr.TemplateID)
-	s.mut.Unlock()
 	return tr.TemplateID
 }
 
-func calcMinRecLen(fieldSpecifiers []TemplateFieldSpecifier) uint16 {
-	var minLength uint16
-	for i := range fieldSpecifiers {
-		if fieldSpecifiers[i].Length == 65535 {
-			minLength++
+func calcMinRecLen(tpl []TemplateFieldSpecifier) uint16 {
+	var minLen uint16
+	for i := range tpl {
+		if tpl[i].Length == 65535 {
+			minLen++
 		} else {
-			minLength += fieldSpecifiers[i].Length
+			minLen += tpl[i].Length
 		}
 	}
-	return minLength
+	return minLen
 }
 
-func (s *Session) lookupTemplateFieldSpecifiers(TemplateID uint16) []TemplateFieldSpecifier {
-	var specifiers []TemplateFieldSpecifier
+func (s *Session) lookupTemplateFieldSpecifiers(tid uint16) []TemplateFieldSpecifier {
+	var tpl []TemplateFieldSpecifier
 
-	if s.withTemplateIDAliasing {
-		specifiers = s.lookupAliasedTemplateFieldSpecifiers(TemplateID)
+	if s.withIDAliasing {
+		tpl = s.lookupAliasedTemplateFieldSpecifiers(tid)
 	} else {
-		specifiers = s.lookupUnaliasedTemplateFieldSpecifiers(TemplateID)
+		tpl = s.lookupUnaliasedTemplateFieldSpecifiers(tid)
 	}
 
-	return specifiers
+	return tpl
 }
 
-func (s *Session) lookupUnaliasedTemplateFieldSpecifiers(TemplateID uint16) []TemplateFieldSpecifier {
-	var fieldSpecifiers []TemplateFieldSpecifier
+func (s *Session) lookupUnaliasedTemplateFieldSpecifiers(tid uint16) []TemplateFieldSpecifier {
+	var tpl []TemplateFieldSpecifier
 
 	s.mut.RLock()
-	if id, ok := s.specifiers[TemplateID]; ok {
-		fieldSpecifiers = id
+	defer s.mut.RUnlock()
+	if id, ok := s.specifiers[tid]; ok {
+		tpl = id
+	}
+
+	return tpl
+}
+
+func (s *Session) lookupAliasedTemplateFieldSpecifiers(tid uint16) []TemplateFieldSpecifier {
+	var tpl []TemplateFieldSpecifier
+
+	s.mut.RLock()
+	if id, ok := s.aliases[tid]; ok {
+		tpl = s.specifiers[id]
 	}
 	s.mut.RUnlock()
 
-	return fieldSpecifiers
+	return tpl
 }
 
-func (s *Session) lookupAliasedTemplateFieldSpecifiers(TemplateID uint16) []TemplateFieldSpecifier {
-	var fieldSpecifiers []TemplateFieldSpecifier
+func (s *Session) getMinRecLen(tid uint16) uint16 {
+	var minLen uint16
 
 	s.mut.RLock()
-	if id, ok := s.aliases[TemplateID]; ok {
-		fieldSpecifiers = s.specifiers[id]
-	}
-	s.mut.RUnlock()
-
-	return fieldSpecifiers
-}
-
-func (s *Session) getMinRecordLength(TemplateID uint16) uint16 {
-	var minLength uint16
-
-	s.mut.RLock()
-	if s.withTemplateIDAliasing {
-		minLength = s.minRecord[s.aliases[TemplateID]]
+	defer s.mut.RUnlock()
+	if s.withIDAliasing {
+		minLen = s.minRecord[s.aliases[tid]]
 	} else {
-		minLength = s.minRecord[TemplateID]
+		minLen = s.minRecord[tid]
 	}
-	s.mut.RUnlock()
 
-	return minLength
+	return minLen
 }
 
 func (s *Session) readVariableLength(sl *slice) (val []byte, err error) {
