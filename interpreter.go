@@ -144,12 +144,11 @@ func (i *Interpreter) Interpret(rec DataRecord) []InterpretedField {
 // InterpretInto interprets a raw DataRecord into an existing slice of
 // InterpretedFields. If the slice is not long enough it will be reallocated.
 func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField) []InterpretedField {
-	i.session.mut.RLock()
-	tpl := i.session.templates[rec.TemplateID]
-	i.session.mut.RUnlock()
+	tpl := i.session.lookupTemplateFieldSpecifiers(rec.TemplateID)
 	if tpl == nil {
 		return nil
 	}
+
 	if len(fieldList) < len(tpl) {
 		fieldList = make([]InterpretedField, len(tpl))
 	} else {

@@ -1,6 +1,9 @@
 package ipfix
 
 import (
+	"bytes"
+	"crypto/sha1"
+	"encoding/binary"
 	"errors"
 	"io"
 	"sync"
@@ -90,25 +93,52 @@ type TemplateFieldSpecifier struct {
 	Length       uint16
 }
 
+// An option can be passed to New()
+type Option func(*Session)
+
+// WithIDAliasing enables or disables template id aliasing. The default is disabled.
+func WithIDAliasing(v bool) Option {
+	return func(s *Session) {
+		s.withIDAliasing = v
+	}
+}
+
 // The Session is the context for IPFIX messages.
 type Session struct {
 	buffers *sync.Pool
 
-	mut       sync.RWMutex
-	templates [][]TemplateFieldSpecifier
-	minRecord []uint16
+	withIDAliasing bool
+
+	mut        sync.RWMutex
+	minRecord  map[uint16]uint16
+	signatures map[[sha1.Size]byte]uint16
+	specifiers map[uint16][]TemplateFieldSpecifier
+	aliases    map[uint16]uint16
+	nextID     uint16
 }
 
 // NewSession initializes a new Session based on the provided io.Reader.
-func NewSession() *Session {
+func NewSession(opts ...Option) *Session {
 	var s Session
-	s.templates = make([][]TemplateFieldSpecifier, 65536)
-	s.minRecord = make([]uint16, 65536)
 	s.buffers = &sync.Pool{
 		New: func() interface{} {
 			return make([]byte, 65536)
 		},
 	}
+
+	for _, opt := range opts {
+		opt(&s)
+	}
+
+	if s.withIDAliasing {
+		s.signatures = make(map[[sha1.Size]byte]uint16)
+		s.aliases = make(map[uint16]uint16)
+		s.nextID = 256
+	}
+
+	s.specifiers = make(map[uint16][]TemplateFieldSpecifier)
+	s.minRecord = make(map[uint16]uint16)
+
 	return &s
 }
 
@@ -133,6 +163,7 @@ func (s *Session) ParseReader(r io.Reader) (Message, error) {
 	sl := newSlice(bs[msgHeaderLength:])
 	var msg Message
 	msg.Header = hdr
+
 	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl)
 	s.buffers.Put(bs)
 	return msg, err
@@ -202,12 +233,10 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 	var trecs []TemplateRecord
 	var drecs []DataRecord
 
-	s.mut.RLock()
-	minLength := int(s.minRecord[setHdr.SetID])
-	s.mut.RUnlock()
+	minLen := int(s.getMinRecLen(setHdr.SetID))
 
 	for sl.Len() > 0 && sl.Error() == nil {
-		if sl.Len() < minLength {
+		if sl.Len() < minLen {
 			if debug {
 				dl.Println("ignoring padding")
 			}
@@ -237,12 +266,8 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 				dl.Println("parsing template set")
 			}
 			tr := s.readTemplateRecord(sl)
+			s.registerTemplateRecord(&tr)
 			trecs = append(trecs, tr)
-
-			s.registerTemplateRecord(tr)
-			if debug {
-				dl.Printf("registered template: %+v", tr)
-			}
 
 		case setHdr.SetID == 3:
 			// Options Template Set, not handled
@@ -263,10 +288,7 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 			if debug {
 				dl.Println("parsing data set")
 			}
-
-			s.mut.RLock()
-			tpl := s.templates[setHdr.SetID]
-			s.mut.RUnlock()
+			tpl := s.lookupTemplateFieldSpecifiers(setHdr.SetID)
 
 			if tpl != nil {
 				// Data set
@@ -274,7 +296,7 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 				if err != nil {
 					return nil, nil, err
 				}
-				ds.TemplateID = setHdr.SetID
+				ds.TemplateID = s.unaliasTemplateID(setHdr.SetID)
 				drecs = append(drecs, ds)
 			} else {
 				// Data set with unknown template
@@ -286,6 +308,15 @@ func (s *Session) readSet(setHdr setHeader, sl *slice) ([]TemplateRecord, []Data
 	}
 
 	return trecs, drecs, sl.Error()
+}
+
+func (s *Session) unaliasTemplateID(tid uint16) uint16 {
+	if s.withIDAliasing {
+		s.mut.RLock()
+		tid = s.aliases[tid]
+		s.mut.RUnlock()
+	}
+	return tid
 }
 
 func (s *Session) readDataRecord(sl *slice, tpl []TemplateFieldSpecifier) (DataRecord, error) {
@@ -349,6 +380,143 @@ func (s *Session) readTemplateRecord(sl *slice) TemplateRecord {
 	return tr
 }
 
+func (s *Session) registerTemplateRecord(tr *TemplateRecord) {
+	if s.withIDAliasing {
+		tr.TemplateID = s.registerAliasedTemplateRecord(*tr)
+	} else {
+		s.registerUnaliasedTemplateRecord(*tr)
+	}
+}
+
+func (s *Session) registerUnaliasedTemplateRecord(tr TemplateRecord) {
+	// Update templates and minimum record cache
+	tid := tr.TemplateID
+	tpl := tr.FieldSpecifiers
+	minLen := calcMinRecLen(tpl)
+	s.mut.Lock()
+	defer s.mut.Unlock()
+	if minLen == 0 {
+		delete(s.specifiers, tid)
+	} else {
+		s.specifiers[tid] = tpl
+	}
+	s.minRecord[tid] = minLen
+}
+
+func (s *Session) registerAliasedTemplateRecord(tr TemplateRecord) uint16 {
+	var tid uint16
+	if len(tr.FieldSpecifiers) == 0 {
+		s.withdrawAliasedTemplateRecord(tr)
+		tid = tr.TemplateID
+	} else {
+		tid = s.aliasTemplateRecord(tr)
+	}
+
+	if debug {
+		dl.Printf("Mapped template id %d -> %d", tr.TemplateID, tid)
+	}
+	return tid
+}
+
+func (s *Session) aliasTemplateRecord(tr TemplateRecord) uint16 {
+	var buffer bytes.Buffer
+	binary.Write(&buffer, binary.BigEndian, tr.FieldSpecifiers)
+	hash := sha1.Sum(buffer.Bytes())
+
+	var ntid uint16
+	s.mut.Lock()
+	defer s.mut.Unlock()
+
+	if id, ok := s.signatures[hash]; ok {
+		ntid = id
+	} else {
+		ntid = s.nextID
+		s.signatures[hash] = ntid
+		s.specifiers[ntid] = tr.FieldSpecifiers
+		s.nextID++
+
+		if s.nextID == 65535 {
+			panic("IPFIX has run out of virtual template ids!")
+		}
+
+		s.minRecord[ntid] = calcMinRecLen(tr.FieldSpecifiers)
+	}
+
+	if _, ok := s.aliases[tr.TemplateID]; !ok {
+		s.aliases[tr.TemplateID] = ntid
+	}
+
+	return ntid
+}
+
+func (s *Session) withdrawAliasedTemplateRecord(tr TemplateRecord) {
+	s.mut.Lock()
+	defer s.mut.Unlock()
+	delete(s.aliases, tr.TemplateID)
+}
+
+func calcMinRecLen(tpl []TemplateFieldSpecifier) uint16 {
+	var minLen uint16
+	for i := range tpl {
+		if tpl[i].Length == 65535 {
+			minLen++
+		} else {
+			minLen += tpl[i].Length
+		}
+	}
+	return minLen
+}
+
+func (s *Session) lookupTemplateFieldSpecifiers(tid uint16) []TemplateFieldSpecifier {
+	var tpl []TemplateFieldSpecifier
+
+	if s.withIDAliasing {
+		tpl = s.lookupAliasedTemplateFieldSpecifiers(tid)
+	} else {
+		tpl = s.lookupUnaliasedTemplateFieldSpecifiers(tid)
+	}
+
+	return tpl
+}
+
+func (s *Session) lookupUnaliasedTemplateFieldSpecifiers(tid uint16) []TemplateFieldSpecifier {
+	var tpl []TemplateFieldSpecifier
+
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+	if id, ok := s.specifiers[tid]; ok {
+		tpl = id
+	}
+
+	return tpl
+}
+
+func (s *Session) lookupAliasedTemplateFieldSpecifiers(tid uint16) []TemplateFieldSpecifier {
+	var tpl []TemplateFieldSpecifier
+
+	s.mut.RLock()
+	if id, ok := s.aliases[tid]; ok {
+		tpl = s.specifiers[id]
+	}
+	s.mut.RUnlock()
+
+	return tpl
+}
+
+func (s *Session) getMinRecLen(tid uint16) uint16 {
+	var minLen uint16
+
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+	if s.withIDAliasing {
+		minLen = s.minRecord[s.aliases[tid]]
+	} else {
+		minLen = s.minRecord[tid]
+	}
+
+	return minLen
+}
+
 func (s *Session) readVariableLength(sl *slice) (val []byte, err error) {
 	var l int
 
@@ -360,30 +528,4 @@ func (s *Session) readVariableLength(sl *slice) (val []byte, err error) {
 	}
 
 	return sl.Cut(l), sl.Error()
-}
-
-func (s *Session) registerTemplateRecord(tr TemplateRecord) {
-	// Update the template cache
-	tid := tr.TemplateID
-
-	// Calculate the minimum possible record length
-	var minLength uint16
-	for i := range tr.FieldSpecifiers {
-		if tr.FieldSpecifiers[i].Length == 65535 {
-			minLength++
-		} else {
-			minLength += tr.FieldSpecifiers[i].Length
-		}
-	}
-
-	// Update templates and minimum record cache
-	s.mut.Lock()
-	if len(tr.FieldSpecifiers) == 0 {
-		// Set was withdrawn
-		s.templates[tid] = nil
-	} else {
-		s.templates[tid] = tr.FieldSpecifiers
-	}
-	s.minRecord[tid] = minLength
-	s.mut.Unlock()
 }
