@@ -44,6 +44,35 @@ func TestParseTemplateSet(t *testing.T) {
 		t.Error("Incorrect template ID", id)
 	}
 }
+func TestParseTemplateIDAliasing(t *testing.T) {
+	packet, _ := hex.DecodeString("000a017c51ec4264000000000b20bdbe0002016c283b0008001c0010800c000400003c258003000800003c258004000800003c258012ffff00003c258001ffff00003c25801cffff00003c25001b0010c2ac0008000c0004800c000400003c258003000800003c258004000800003c258012ffff00003c258001ffff00003c25801cffff00003c250008000412340008001c0010800c000400003c258003000800003c258004000800003c258012ffff00003c258001ffff00003c25801cffff00003c25001b0010abcd0008000c0004800c000400003c258003000800003c258004000800003c258012ffff00003c258001ffff00003c25801cffff00003c250008000412340008001c0010800c000400003c258003000800003c258004000800003c258012ffff00003c258001ffff00003c25801cffff00003c25001b0010abcd0008000c0004800c000400003c258003000800003c258004000800003c258012ffff00003c258001ffff00003c25801cffff00003c2500080004")
+	p := ipfix.NewSession(ipfix.WithTemplateIDAliasing(true))
+
+	r := bytes.NewBuffer(packet)
+	msg, err := p.ParseBuffer(r.Bytes())
+	if err != nil {
+		t.Fatal("ParseBuffer failed", err)
+	}
+
+	if msg.Header.Version != uint16(0xa) {
+		t.Errorf("version mismatch %d != 10", msg.Header.Version)
+	}
+	if len(msg.DataRecords) != 0 {
+		t.Error("Incorrect number of data records", len(msg.DataRecords))
+	}
+	if len(msg.TemplateRecords) != 6 {
+		t.Error("Incorrect number of template records", len(msg.TemplateRecords))
+	}
+
+	for i := 0; i < len(msg.TemplateRecords); i += 2 {
+		if id := msg.TemplateRecords[i].TemplateID; id != uint16(256) {
+			t.Error("Incorrect template ID", id)
+		}
+		if id := msg.TemplateRecords[i+1].TemplateID; id != uint16(257) {
+			t.Error("Incorrect template ID", id)
+		}
+	}
+}
 
 func TestParseDataSet(t *testing.T) {
 	p0, _ := hex.DecodeString("000a008c51ec4264000000000b20bdbe0002007c283b0008001c0010800c000400003c258003000800003c258004000800003c258012ffff00003c258001ffff00003c25801cffff00003c25001b0010c2ac0008000c0004800c000400003c258003000800003c258004000800003c258012ffff00003c258001ffff00003c25801cffff00003c2500080004")
