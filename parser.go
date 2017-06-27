@@ -5,7 +5,6 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"sync"
 )
@@ -112,7 +111,7 @@ type Session struct {
 
 	mut        sync.RWMutex
 	minRecord  map[uint16]uint16
-	signatures map[string]uint16
+	signatures map[[sha1.Size]byte]uint16
 	specifiers map[uint16][]TemplateFieldSpecifier
 	aliases    map[uint16]uint16
 	nextID     uint16
@@ -132,7 +131,7 @@ func NewSession(opts ...Option) *Session {
 	}
 
 	if s.withIDAliasing {
-		s.signatures = make(map[string]uint16)
+		s.signatures = make(map[[sha1.Size]byte]uint16)
 		s.aliases = make(map[uint16]uint16)
 		s.nextID = 256
 	}
@@ -407,7 +406,8 @@ func (s *Session) registerUnaliasedTemplateRecord(tr TemplateRecord) {
 func (s *Session) registerAliasedTemplateRecord(tr TemplateRecord) uint16 {
 	var tid uint16
 	if len(tr.FieldSpecifiers) == 0 {
-		tid = s.withdrawAliasedTemplateRecord(tr)
+		s.withdrawAliasedTemplateRecord(tr)
+		tid = tr.TemplateID
 	} else {
 		tid = s.aliasTemplateRecord(tr)
 	}
@@ -421,7 +421,7 @@ func (s *Session) registerAliasedTemplateRecord(tr TemplateRecord) uint16 {
 func (s *Session) aliasTemplateRecord(tr TemplateRecord) uint16 {
 	var buffer bytes.Buffer
 	binary.Write(&buffer, binary.BigEndian, tr.FieldSpecifiers)
-	hash := fmt.Sprintf("%x", sha1.Sum(buffer.Bytes()))
+	hash := sha1.Sum(buffer.Bytes())
 
 	var ntid uint16
 	s.mut.Lock()
@@ -435,6 +435,10 @@ func (s *Session) aliasTemplateRecord(tr TemplateRecord) uint16 {
 		s.specifiers[ntid] = tr.FieldSpecifiers
 		s.nextID++
 
+		if s.nextID == 65535 {
+			panic("IPFIX has run out of virtual template ids!")
+		}
+
 		s.minRecord[ntid] = calcMinRecLen(tr.FieldSpecifiers)
 	}
 
@@ -445,11 +449,10 @@ func (s *Session) aliasTemplateRecord(tr TemplateRecord) uint16 {
 	return ntid
 }
 
-func (s *Session) withdrawAliasedTemplateRecord(tr TemplateRecord) uint16 {
+func (s *Session) withdrawAliasedTemplateRecord(tr TemplateRecord) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 	delete(s.aliases, tr.TemplateID)
-	return tr.TemplateID
 }
 
 func calcMinRecLen(tpl []TemplateFieldSpecifier) uint16 {
