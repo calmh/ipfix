@@ -150,3 +150,5 @@ func TestIssue12(t *testing.T) {
 		t.Error("Didn't find expected field")
 	}
 }
+func TestIssuePointless(t *testing.T) {
+}
