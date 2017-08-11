@@ -24,6 +24,10 @@ var ErrRead = errors.New("short read - malformed packet?")
 // error are encountered.
 var ErrProtocol = errors.New("protocol error")
 
+// ErrIter is returned when a BufferIter has been exhausted and no more
+// messages can be extracted from the enclosed buffer.
+var ErrIter = errors.New("iterator exhausted")
+
 // A Message is the top level construct representing an IPFIX message. A well
 // formed message contains one or more sets of data or template information.
 type Message struct {
@@ -142,6 +146,30 @@ func NewSession(opts ...Option) *Session {
 	return &s
 }
 
+// BufferIter wraps a buffer containing multiple IPFIX messages
+type BufferIter struct {
+	bs  []byte
+	off uint16
+}
+
+// Initializes a new BufferIter
+func NewBufferIter(bs []byte) *BufferIter {
+	return &BufferIter{bs: bs}
+}
+
+// Returns true if the BufferIter contains more messages
+func (b *BufferIter) Next() bool {
+	return int(b.off) < len(b.bs)-msgHeaderLength
+}
+
+func (b *BufferIter) updateOffset(inc uint16) {
+	b.off += inc
+}
+
+func (b *BufferIter) forceExhaustion() {
+	b.off = ^uint16(0)
+}
+
 const (
 	msgHeaderLength = 2 + 2 + 4 + 4 + 4
 	setHeaderLength = 2 + 2
@@ -178,6 +206,43 @@ func (s *Session) ParseBuffer(bs []byte) (Message, error) {
 	sl := newSlice(bs)
 	msg.Header.unmarshal(sl)
 	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl)
+	return msg, err
+}
+
+// ParseBufferIter extracts one message from the given buffer iterator and
+// returns it. The caller should call BufferIter.Next() in between each call to
+// ParserBufferIter. Each call to ParseBufferIter advances the BufferIter by
+// one message. Err is nil if the buffer could be correctly parsed.
+// Errors are not recoverable -- once an error has been returned,
+// ParseBufferIter should not be called again on the same BufferIter
+// ParseBufferIter is NOT goroutine safe.
+func (s *Session) ParseBufferIter(bi *BufferIter) (Message, error) {
+	var msg Message
+	var err error
+
+	if !bi.Next() {
+		return msg, ErrIter
+	}
+
+	hdrStart := bi.off
+	hdrEnd := hdrStart + msgHeaderLength
+
+	hsl := newSlice(bi.bs[hdrStart:hdrEnd])
+	msg.Header.unmarshal(hsl)
+
+	recStart := hdrEnd
+	recEnd := recStart + msg.Header.Length - msgHeaderLength
+
+	bi.updateOffset(msg.Header.Length)
+
+	sl := newSlice(bi.bs[recStart:recEnd])
+
+	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl)
+
+	if err != nil {
+		bi.forceExhaustion()
+	}
+
 	return msg, err
 }
 
