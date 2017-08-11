@@ -350,3 +350,30 @@ func TestParsingTemplateAndDataRecords(t *testing.T) {
 		t.Error("Incorrect number of data records", len(msg.DataRecords))
 	}
 }
+
+func TestParseBufferIter(t *testing.T) {
+	packet, _ := hex.DecodeString("000a00405685b3700000000000bc614e000200140100000300080004000c0004000200040100001cc0a800c9c0a80001000000ebc0a800cac0a800010000002a000a00405685b3700000000000bc614e000200140100000300080004000c0004000200040100001cc0a800c9c0a80001000000ebc0a800cac0a800010000002a000a00405685b3700000000000bc614e000200140100000300080004000c0004000200040100001cc0a800c9c0a80001000000ebc0a800cac0a800010000002a000a00405685b3700000000000bc614e000200140100000300080004000c0004000200040100001cc0a800c9c0a80001000000ebc0a800cac0a800010000002a")
+	bi := ipfix.NewBufferIter(packet)
+	p := ipfix.NewSession()
+	totNbrMsgs := 0
+
+	for bi.Next() {
+		msg, err := p.ParseBufferIter(bi)
+		if err != nil {
+			t.Fatal("ParseBuffer failed", err)
+		}
+
+		if len(msg.TemplateRecords) != 1 {
+			t.Error("Incorrect number of template records", len(msg.TemplateRecords))
+		}
+		if len(msg.DataRecords) != 2 {
+			t.Error("Incorrect number of data records", len(msg.DataRecords))
+		}
+
+		totNbrMsgs++
+	}
+
+	if totNbrMsgs != 4 {
+		t.Error("Incorrect number of messages parsed")
+	}
+}
