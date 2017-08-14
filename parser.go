@@ -164,8 +164,7 @@ func (s *Session) ParseReader(r io.Reader) (Message, error) {
 	var msg Message
 	msg.Header = hdr
 
-	readLimit := msg.Header.Length - msgHeaderLength
-	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl, readLimit)
+	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl)
 	s.buffers.Put(bs)
 	return msg, err
 }
@@ -178,38 +177,40 @@ func (s *Session) ParseBuffer(bs []byte) (Message, error) {
 
 	sl := newSlice(bs)
 	msg.Header.unmarshal(sl)
-	readLimit := msg.Header.Length - msgHeaderLength
-	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl, readLimit)
+	msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl)
 	return msg, err
 }
 
-// ParseBuffer extracts all message from the given buffer and returns them. Err
-// is nil if the buffer could be parsed correctly. ParseBufferAll is goroutine
-// safe.
+// ParseBufferAll extracts all message from the given buffer and returns them.
+// Err is nil if the buffer could be parsed correctly. ParseBufferAll is
+// goroutine safe.
 func (s *Session) ParseBufferAll(bs []byte) ([]Message, error) {
 	var msgs []Message
 	var err error
 
 	sl := newSlice(bs)
 
-	for sl.Len() > 0 && err == nil {
+	for sl.Len() > 0 {
 		var msg Message
 		msg.Header.unmarshal(sl)
-		readLimit := msg.Header.Length - msgHeaderLength
-		if msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(sl, readLimit); err == nil {
-			msgs = append(msgs, msg)
+		length := int(msg.Header.Length - msgHeaderLength)
+
+		cut := newSlice(sl.Cut(length))
+		if msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(cut); err != nil {
+			break
 		}
+
+		msgs = append(msgs, msg)
 	}
 	return msgs, err
 }
 
-func (s *Session) readBuffer(sl *slice, limit uint16) ([]TemplateRecord, []DataRecord, error) {
+func (s *Session) readBuffer(sl *slice) ([]TemplateRecord, []DataRecord, error) {
 	var ts, trecs []TemplateRecord
 	var ds, drecs []DataRecord
 	var err error
 
-	len := sl.Len()
-	for len-sl.Len() < int(limit) {
+	for sl.Len() > 0 {
 		// Read a set header
 		var setHdr setHeader
 		setHdr.unmarshal(sl)
