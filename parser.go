@@ -181,6 +181,30 @@ func (s *Session) ParseBuffer(bs []byte) (Message, error) {
 	return msg, err
 }
 
+// ParseBufferAll extracts all message from the given buffer and returns them.
+// Err is nil if the buffer could be parsed correctly. ParseBufferAll is
+// goroutine safe.
+func (s *Session) ParseBufferAll(bs []byte) ([]Message, error) {
+	var msgs []Message
+	var err error
+
+	sl := newSlice(bs)
+
+	for sl.Len() > 0 {
+		var msg Message
+		msg.Header.unmarshal(sl)
+		length := int(msg.Header.Length - msgHeaderLength)
+
+		cut := newSlice(sl.Cut(length))
+		if msg.TemplateRecords, msg.DataRecords, err = s.readBuffer(cut); err != nil {
+			break
+		}
+
+		msgs = append(msgs, msg)
+	}
+	return msgs, err
+}
+
 func (s *Session) readBuffer(sl *slice) ([]TemplateRecord, []DataRecord, error) {
 	var ts, trecs []TemplateRecord
 	var ds, drecs []DataRecord
