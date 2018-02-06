@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -43,6 +44,7 @@ const (
 	DateTimeNanoseconds
 	Ipv4Address
 	Ipv6Address
+	BasicList
 )
 
 // FieldTypes maps string representations of field types into their
@@ -68,6 +70,7 @@ var FieldTypes = map[string]FieldType{
 	"dateTimeNanoseconds":  DateTimeNanoseconds,
 	"ipv4Address":          Ipv4Address,
 	"ipv6Address":          Ipv6Address,
+	"basicList":            BasicList,
 }
 
 // minLength is the minimum length of a field of the given type, in bytes.
@@ -161,7 +164,24 @@ func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField
 
 		if entry, ok := i.dictionary[dictionaryKey{field.EnterpriseID, field.FieldID}]; ok {
 			fieldList[j].Name = entry.Name
-			fieldList[j].Value = interpretBytes(&rec.Fields[j], entry.Type)
+
+			if entry.Type == BasicList {
+				bs := &rec.Fields[j]
+				semantic := uint8(number((*bs)[0:1]))
+				fieldID := uint16(number((*bs)[1:3]))
+				fieldLen := uint16(number((*bs)[3:5]))
+
+				listString := fmt.Sprintf("(semantic=%d,fieldID=%d,fieldLen=%d)[", semantic, fieldID, fieldLen)
+
+				for offset := 5; offset < len(*bs); offset += int(fieldLen) {
+					temp := (*bs)[offset : offset+int(fieldLen)]
+					listString = fmt.Sprintf("%s%v,", listString, interpretBytes(&temp, i.dictionary[dictionaryKey{0, fieldID}].Type))
+				}
+
+				fieldList[j].Value = strings.TrimRight(listString, ",") + "]"
+			} else {
+				fieldList[j].Value = interpretBytes(&rec.Fields[j], entry.Type)
+			}
 		} else {
 			fieldList[j].RawValue = rec.Fields[j]
 		}
