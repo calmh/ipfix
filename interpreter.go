@@ -7,7 +7,6 @@ import (
 	"math"
 	"net"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -167,18 +166,17 @@ func (i *Interpreter) InterpretInto(rec DataRecord, fieldList []InterpretedField
 
 			if entry.Type == BasicList {
 				bs := &rec.Fields[j]
-				semantic := uint8(number((*bs)[0:1]))
 				fieldID := uint16(number((*bs)[1:3]))
 				fieldLen := uint16(number((*bs)[3:5]))
 
-				listString := fmt.Sprintf("(semantic=%d,fieldID=%d,fieldLen=%d)[", semantic, fieldID, fieldLen)
+				var list []interface{}
 
 				for offset := 5; offset < len(*bs); offset += int(fieldLen) {
 					temp := (*bs)[offset : offset+int(fieldLen)]
-					listString = fmt.Sprintf("%s%v,", listString, interpretBytes(&temp, i.dictionary[dictionaryKey{0, fieldID}].Type))
+					list = append(list, interpretBytes(&temp, i.dictionary[dictionaryKey{0, fieldID}].Type))
 				}
 
-				fieldList[j].Value = strings.TrimRight(listString, ",") + "]"
+				fieldList[j].Value = list
 			} else {
 				fieldList[j].Value = interpretBytes(&rec.Fields[j], entry.Type)
 			}
