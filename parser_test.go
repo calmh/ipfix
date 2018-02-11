@@ -229,7 +229,7 @@ func TestParallellParseBuffer(t *testing.T) {
 	}
 }
 
-func TestEOFError(t *testing.T) {
+func TestUnexpectedEOFError(t *testing.T) {
 	truncated, _ := hex.DecodeString("000a008c51ec4264000000000b20bdbe0002007c283b0008001c0010800c000400003c258003000800003c258004000800003c258012ffff00003c258001ffff00003c25801cffff00003c25001b0010c2ac0008000c0004800c000400003c258003000800003c258004000800003c258")
 	b := new(bytes.Buffer)
 	p := ipfix.NewSession()
@@ -237,7 +237,7 @@ func TestEOFError(t *testing.T) {
 	b.Write(truncated)
 
 	_, err := p.ParseReader(b)
-	if err != io.EOF {
+	if err != io.ErrUnexpectedEOF {
 		t.Fatalf("Received %v instead of io.EOF error", err)
 	}
 }
