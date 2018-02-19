@@ -553,3 +553,36 @@ func (s *Session) readVariableLength(sl *slice) (val []byte, err error) {
 
 	return sl.Cut(l), sl.Error()
 }
+
+func (s *Session) ExportTemplateRecords() []TemplateRecord {
+	trecs := make([]TemplateRecord, 0, len(s.specifiers))
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+
+	if s.withIDAliasing {
+		for t, a := range s.aliases {
+			tr := TemplateRecord{
+				TemplateID:      t,
+				FieldSpecifiers: s.specifiers[a],
+			}
+
+			trecs = append(trecs, tr)
+		}
+	} else {
+		for t, fs := range s.specifiers {
+			tr := TemplateRecord{
+				TemplateID:      t,
+				FieldSpecifiers: fs,
+			}
+			trecs = append(trecs, tr)
+		}
+	}
+
+	return trecs
+}
+
+func (s *Session) LoadTemplateRecords(trecs []TemplateRecord) {
+	for _, tr := range trecs {
+		s.registerTemplateRecord(&tr)
+	}
+}
