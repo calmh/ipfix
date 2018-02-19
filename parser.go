@@ -562,7 +562,7 @@ func (s *Session) ExportTemplateRecords() []TemplateRecord {
 	if s.withIDAliasing {
 		for t, a := range s.aliases {
 			tr := TemplateRecord{
-				TemplateID: t,
+				TemplateID:      t,
 				FieldSpecifiers: s.specifiers[a],
 			}
 
