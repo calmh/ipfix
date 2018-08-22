@@ -32,6 +32,104 @@ type Message struct {
 	TemplateRecords []TemplateRecord
 }
 
+// Marshall a Message struct back into a raw IPFIX buffer
+func (s *Session) Marshal(m *Message) ([]byte, error) {
+	// Build template records set
+	tmplSet := make([]byte, 4)
+	binary.BigEndian.PutUint16(tmplSet[:2], 2) // Always 2 for templates
+	t := make([]byte, 8)
+	newRecord := make([]byte, 4)
+	for _, rec := range m.TemplateRecords {
+		// Build the record header
+		newRecord = newRecord[:4]
+		binary.BigEndian.PutUint16(newRecord[:2], rec.TemplateID)
+		// Now build out the fields
+		for _, field := range rec.FieldSpecifiers {
+			if field.EnterpriseID == 0 {
+				// No enterprise needed
+				binary.BigEndian.PutUint16(t[:2], field.FieldID)
+				binary.BigEndian.PutUint16(t[2:4], field.Length)
+				newRecord = append(newRecord, t[:4]...)
+			} else {
+				binary.BigEndian.PutUint16(t[:2], field.FieldID+0x8000)
+				binary.BigEndian.PutUint16(t[2:4], field.Length)
+				binary.BigEndian.PutUint32(t[4:8], field.EnterpriseID)
+				newRecord = append(newRecord, t...)
+			}
+		}
+		// Set the length of this record
+		binary.BigEndian.PutUint16(newRecord[2:4], uint16(len(rec.FieldSpecifiers)))
+
+		// Finally, append it to the set
+		tmplSet = append(tmplSet, newRecord...)
+	}
+	// construct template set header
+	binary.BigEndian.PutUint16(tmplSet[:2], 2)
+	binary.BigEndian.PutUint16(tmplSet[2:4], uint16(len(tmplSet)))
+
+	// Add the header
+	message := make([]byte, msgHeaderLength)
+	binary.BigEndian.PutUint16(message[:2], m.Header.Version)
+	binary.BigEndian.PutUint32(message[4:8], m.Header.ExportTime)
+	binary.BigEndian.PutUint32(message[8:12], m.Header.SequenceNumber)
+	binary.BigEndian.PutUint32(message[12:16], m.Header.DomainID)
+
+	// Put the template set onto the header
+	if len(tmplSet) > setHeaderLength {
+		message = append(message, tmplSet...)
+	}
+
+	// Build data record section
+	// It's possible that there were multiple sets with alternating templates,
+	// e.g. set 0 used template 256, set 1 used template 300, set 2 used 256 again.
+	var currentTemplate uint16
+	var tpl []TemplateFieldSpecifier
+	dataSet := make([]byte, 4)
+	for _, dr := range m.DataRecords {
+		if dr.TemplateID != currentTemplate {
+			// We've transitioned, append the previous set and make a new one
+			// first we need to set the length of this set...
+			if len(dataSet) > setHeaderLength {
+				binary.BigEndian.PutUint16(dataSet[2:4], uint16(len(dataSet)))
+				message = append(message, dataSet...)
+			}
+			// now set up for the next set
+			dataSet = dataSet[:4]
+			binary.BigEndian.PutUint16(dataSet[:2], dr.TemplateID)
+			currentTemplate = dr.TemplateID
+			tpl = s.lookupTemplateFieldSpecifiers(dr.TemplateID)
+		}
+		for i, field := range dr.Fields {
+			if i > len(tpl) {
+				return message, errors.New("too many fields for template")
+			}
+			// Handle variable-length fields
+			if tpl[i].Length == 0xffff {
+				if len(field) < 0xff {
+					dataSet = append(dataSet, uint8(len(field)))
+					dataSet = append(dataSet, field...)
+				} else {
+					b := []byte{0xff, 0, 0}
+					binary.BigEndian.PutUint16(b[1:3], uint16(len(field)))
+					dataSet = append(dataSet, b...)
+					dataSet = append(dataSet, field...)
+				}
+			} else {
+				dataSet = append(dataSet, field...)
+			}
+		}
+	}
+	// Emit the final set
+	if len(dataSet) > setHeaderLength {
+		binary.BigEndian.PutUint16(dataSet[2:4], uint16(len(dataSet)))
+		message = append(message, dataSet...)
+	}
+
+	binary.BigEndian.PutUint16(message[2:4], uint16(len(message)))
+
+	return message, nil
+}
+
 // The MessageHeader provides metadata for the entire Message. The sequence
 // number and domain ID can be used to gain knowledge of messages lost on an
 // unreliable transport such as UDP.
