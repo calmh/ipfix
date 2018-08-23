@@ -24,6 +24,10 @@ var ErrRead = errors.New("short read - malformed packet?")
 // error are encountered.
 var ErrProtocol = errors.New("protocol error")
 
+// ErrUnknownTemplate is returned when a message's data set refers to a template
+// which has not yet been seen by the parser.
+var ErrUnknownTemplate = errors.New("unknown template")
+
 // A Message is the top level construct representing an IPFIX message. A well
 // formed message contains one or more sets of data or template information.
 type Message struct {
@@ -34,7 +38,7 @@ type Message struct {
 
 // Returns overall length of the message, the length of the template set, and
 // the length of the data set(s).
-func (s *Session) calculateMarshalledLength(m *Message) (int, int, int, error) {
+func (s *Session) calculateMarshalledLength(m Message) (int, int, int, error) {
 	var length int
 	var tmplLen, dataLen int
 	length += msgHeaderLength // there will always be a header
@@ -88,7 +92,7 @@ func (s *Session) calculateMarshalledLength(m *Message) (int, int, int, error) {
 }
 
 // Marshall a Message struct back into a raw IPFIX buffer
-func (s *Session) Marshal(m *Message) ([]byte, error) {
+func (s *Session) Marshal(m Message) ([]byte, error) {
 	// First we'll calculate how big the message will be
 	length, tmplLen, _, err := s.calculateMarshalledLength(m)
 	if err != nil {
@@ -651,6 +655,28 @@ func calcMinRecLen(tpl []TemplateFieldSpecifier) uint16 {
 		}
 	}
 	return minLen
+}
+
+// LookupTemplateRecords returns the list of template records referred to by the data sets
+// in the given message. It also includes any templates already extant in the message.
+func (s *Session) LookupTemplateRecords(m Message) ([]TemplateRecord, error) {
+	tr := m.TemplateRecords
+dataLoop:
+	for _, dr := range m.DataRecords {
+		// First walk and make sure this template isn't already in the return list
+		for _, t := range tr {
+			if t.TemplateID == dr.TemplateID {
+				continue dataLoop
+			}
+		}
+		// If we got this far, we haven't seen the template ID yet
+		tfs := s.lookupTemplateFieldSpecifiers(dr.TemplateID)
+		if len(tfs) == 0 {
+			return nil, ErrUnknownTemplate
+		}
+		tr = append(tr, TemplateRecord{TemplateID: dr.TemplateID, FieldSpecifiers: tfs})
+	}
+	return tr, nil
 }
 
 func (s *Session) lookupTemplateFieldSpecifiers(tid uint16) []TemplateFieldSpecifier {
