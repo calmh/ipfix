@@ -32,100 +32,164 @@ type Message struct {
 	TemplateRecords []TemplateRecord
 }
 
-// Marshall a Message struct back into a raw IPFIX buffer
-func (s *Session) Marshal(m *Message) ([]byte, error) {
-	// Build template records set
-	tmplSet := make([]byte, 4)
-	binary.BigEndian.PutUint16(tmplSet[:2], 2) // Always 2 for templates
-	t := make([]byte, 8)
-	newRecord := make([]byte, 4)
-	for _, rec := range m.TemplateRecords {
-		// Build the record header
-		newRecord = newRecord[:4]
-		binary.BigEndian.PutUint16(newRecord[:2], rec.TemplateID)
-		// Now build out the fields
-		for _, field := range rec.FieldSpecifiers {
-			if field.EnterpriseID == 0 {
-				// No enterprise needed
-				binary.BigEndian.PutUint16(t[:2], field.FieldID)
-				binary.BigEndian.PutUint16(t[2:4], field.Length)
-				newRecord = append(newRecord, t[:4]...)
-			} else {
-				binary.BigEndian.PutUint16(t[:2], field.FieldID+0x8000)
-				binary.BigEndian.PutUint16(t[2:4], field.Length)
-				binary.BigEndian.PutUint32(t[4:8], field.EnterpriseID)
-				newRecord = append(newRecord, t...)
+// Returns overall length of the message, the length of the template set, and
+// the length of the data set(s).
+func (s *Session) calculateMarshalledLength(m *Message) (int, int, int, error) {
+	var length int
+	var tmplLen, dataLen int
+	length += msgHeaderLength // there will always be a header
+	if len(m.TemplateRecords) > 0 {
+		// We will be creating a template set
+		tmplLen += setHeaderLength
+		for _, rec := range m.TemplateRecords {
+			// Each template record implies a record header
+			tmplLen += 4
+			for _, field := range rec.FieldSpecifiers {
+				if field.EnterpriseID == 0 {
+					tmplLen += 4
+				} else {
+					tmplLen += 8
+				}
 			}
 		}
-		// Set the length of this record
-		binary.BigEndian.PutUint16(newRecord[2:4], uint16(len(rec.FieldSpecifiers)))
-
-		// Finally, append it to the set
-		tmplSet = append(tmplSet, newRecord...)
 	}
-	// construct template set header
-	binary.BigEndian.PutUint16(tmplSet[:2], 2)
-	binary.BigEndian.PutUint16(tmplSet[2:4], uint16(len(tmplSet)))
+	if len(m.DataRecords) > 0 {
+		currentTemplate := m.DataRecords[0].TemplateID
+		tpl := s.lookupTemplateFieldSpecifiers(currentTemplate)
+		dataLen += setHeaderLength
+		for _, dr := range m.DataRecords {
+			if dr.TemplateID != currentTemplate {
+				dataLen += setHeaderLength
+				tpl = s.lookupTemplateFieldSpecifiers(dr.TemplateID)
+				currentTemplate = dr.TemplateID
+			}
+			for i, field := range dr.Fields {
+				if i > len(tpl) {
+					return 0, 0, 0, errors.New("too many fields for template")
+				}
+				// Handle variable-length fields
+				if tpl[i].Length == 0xffff {
+					if len(field) < 0xff {
+						dataLen += 1          // 1 byte for the length
+						dataLen += len(field) // and then the field itself
+					} else {
+						dataLen += 3          // 3 bytes for the length
+						dataLen += len(field) // and then the field itself
+					}
+				} else {
+					dataLen += int(tpl[i].Length)
+				}
+			}
+		}
+	}
+	length += tmplLen
+	length += dataLen
+	return length, tmplLen, dataLen, nil
+}
 
-	// Add the header
-	message := make([]byte, msgHeaderLength)
+// Marshall a Message struct back into a raw IPFIX buffer
+func (s *Session) Marshal(m *Message) ([]byte, error) {
+	// First we'll calculate how big the message will be
+	length, tmplLen, _, err := s.calculateMarshalledLength(m)
+	if err != nil {
+		return []byte{}, nil
+	}
+
+	// Now make the empty buffer (brings us down to 1 allocation per call to Marshal)
+	message := make([]byte, length)
+
+	// Populate the header
 	binary.BigEndian.PutUint16(message[:2], m.Header.Version)
 	binary.BigEndian.PutUint32(message[4:8], m.Header.ExportTime)
 	binary.BigEndian.PutUint32(message[8:12], m.Header.SequenceNumber)
 	binary.BigEndian.PutUint32(message[12:16], m.Header.DomainID)
+	binary.BigEndian.PutUint16(message[2:4], uint16(length))
+	offset := msgHeaderLength
 
-	// Put the template set onto the header
-	if len(tmplSet) > setHeaderLength {
-		message = append(message, tmplSet...)
+	// Build template records set
+	if len(m.TemplateRecords) > 0 {
+		// construct template set header
+		binary.BigEndian.PutUint16(message[offset:offset+2], 2)                 // type is always 2 for templates
+		binary.BigEndian.PutUint16(message[offset+2:offset+4], uint16(tmplLen)) // we calculated earlier
+		offset += 4
+
+		for _, rec := range m.TemplateRecords {
+			// Build the record header (template ID + number of field specifiers)
+			binary.BigEndian.PutUint16(message[offset:offset+2], rec.TemplateID)
+			binary.BigEndian.PutUint16(message[offset+2:offset+4], uint16(len(rec.FieldSpecifiers)))
+			offset += 4
+			// Now build out the fields
+			for _, field := range rec.FieldSpecifiers {
+				if field.EnterpriseID == 0 {
+					// No enterprise needed
+					binary.BigEndian.PutUint16(message[offset:offset+2], field.FieldID)
+					binary.BigEndian.PutUint16(message[offset+2:offset+4], field.Length)
+					offset += 4
+				} else {
+					binary.BigEndian.PutUint16(message[offset:offset+2], field.FieldID+0x8000)
+					binary.BigEndian.PutUint16(message[offset+2:offset+4], field.Length)
+					binary.BigEndian.PutUint32(message[offset+4:offset+8], field.EnterpriseID)
+					offset += 8
+				}
+			}
+		}
 	}
 
 	// Build data record section
 	// It's possible that there were multiple sets with alternating templates,
 	// e.g. set 0 used template 256, set 1 used template 300, set 2 used 256 again.
-	var currentTemplate uint16
-	var tpl []TemplateFieldSpecifier
-	dataSet := make([]byte, 4)
-	for _, dr := range m.DataRecords {
-		if dr.TemplateID != currentTemplate {
-			// We've transitioned, append the previous set and make a new one
-			// first we need to set the length of this set...
-			if len(dataSet) > setHeaderLength {
-				binary.BigEndian.PutUint16(dataSet[2:4], uint16(len(dataSet)))
-				message = append(message, dataSet...)
-			}
-			// now set up for the next set
-			dataSet = dataSet[:4]
-			binary.BigEndian.PutUint16(dataSet[:2], dr.TemplateID)
-			currentTemplate = dr.TemplateID
-			tpl = s.lookupTemplateFieldSpecifiers(dr.TemplateID)
-		}
-		for i, field := range dr.Fields {
-			if i > len(tpl) {
-				return message, errors.New("too many fields for template")
-			}
-			// Handle variable-length fields
-			if tpl[i].Length == 0xffff {
-				if len(field) < 0xff {
-					dataSet = append(dataSet, uint8(len(field)))
-					dataSet = append(dataSet, field...)
-				} else {
-					b := []byte{0xff, 0, 0}
-					binary.BigEndian.PutUint16(b[1:3], uint16(len(field)))
-					dataSet = append(dataSet, b...)
-					dataSet = append(dataSet, field...)
+	if len(m.DataRecords) > 0 {
+		currentTemplate := m.DataRecords[0].TemplateID
+		tpl := s.lookupTemplateFieldSpecifiers(currentTemplate)
+		setStart := offset // where the current set started
+		// initialize the first set header
+		// We only write the template ID now, since we won't be sure of length until later
+		binary.BigEndian.PutUint16(message[offset:offset+2], currentTemplate)
+		offset += 4
+		for _, dr := range m.DataRecords {
+			if dr.TemplateID != currentTemplate {
+				// We've transitioned templates, make a new set
+				if offset-setStart > setHeaderLength {
+					binary.BigEndian.PutUint16(message[setStart+2:setStart+4], uint16(offset-setStart))
 				}
-			} else {
-				dataSet = append(dataSet, field...)
+				// now set up for the next set
+				setStart = offset
+				currentTemplate = dr.TemplateID
+				tpl = s.lookupTemplateFieldSpecifiers(dr.TemplateID)
+				// We only write the template ID now, since we won't be sure of length until later
+				binary.BigEndian.PutUint16(message[offset:offset+2], dr.TemplateID)
+				offset += 4
+			}
+			for i, field := range dr.Fields {
+				if i > len(tpl) {
+					return message, errors.New("too many fields for template")
+				}
+				// Handle variable-length fields
+				if tpl[i].Length == 0xffff {
+					if len(field) < 0xff {
+						message[offset] = uint8(len(field))
+						offset++
+						copy(message[offset:offset+len(field)], field)
+						offset += len(field)
+					} else {
+						message[offset] = 0xff
+						binary.BigEndian.PutUint16(message[offset+1:offset+3], uint16(len(field)))
+						offset += 3
+						copy(message[offset:offset+len(field)], field)
+						offset += len(field)
+					}
+				} else {
+					copy(message[offset:offset+len(field)], field)
+					offset += len(field)
+				}
 			}
 		}
-	}
-	// Emit the final set
-	if len(dataSet) > setHeaderLength {
-		binary.BigEndian.PutUint16(dataSet[2:4], uint16(len(dataSet)))
-		message = append(message, dataSet...)
-	}
+		// Emit the final set length
+		if offset-setStart > setHeaderLength {
+			binary.BigEndian.PutUint16(message[setStart+2:setStart+4], uint16(offset-setStart))
+		}
 
-	binary.BigEndian.PutUint16(message[2:4], uint16(len(message)))
+	}
 
 	return message, nil
 }
